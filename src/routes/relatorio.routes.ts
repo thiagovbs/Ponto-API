@@ -1,0 +1,12 @@
+import { Router } from 'express';
+import { RelatorioController } from '../controllers/relatorio.controller';
+
+const relatorioRoutes = Router();
+
+// Endpoint: GET /api/relatorios/dashboard
+relatorioRoutes.get('/dashboard', RelatorioController.dashboardGeral);
+
+// Endpoint: GET /api/relatorios/funcionario/:id
+relatorioRoutes.get('/funcionario/:id', RelatorioController.relatorioMensalPorFuncionario);
+
+export { relatorioRoutes };

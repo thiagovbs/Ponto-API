@@ -1,0 +1,48 @@
+version: '3.8'
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: ponto_postgres
+    restart: always
+    environment:
+      POSTGRES_USER: root
+      POSTGRES_PASSWORD: rootpassword
+      POSTGRES_DB: ponto_db
+    ports:
+      - "5434:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  api-backend:
+      build:
+        context: ./ # Caminho para a pasta onde está o Dockerfile do Node.js
+        dockerfile: Dockerfile
+      container_name: api_ponto_backend
+      restart: always
+      ports:
+        - "3003:3003" # Mapeia a porta externa 3003 do seu PC para a 3003 interna do contêiner
+      environment:
+        - NODE_ENV=development
+        - PORT=3003
+        # 🪛 IMPORTANTE: O host da string de conexão muda de "localhost" para "postgres" (o nome do serviço acima)
+        # Nota: Como o backend está dentro da mesma rede do Docker, ele usa a porta interna do banco (5432) e não a 5434
+        - DATABASE_URL=postgresql://root:rootpassword@postgres:5432/ponto_db?schema=public
+      volumes:
+        - .:/app
+        - /app/node_modules
+      depends_on:
+        - postgres # Garante que a API só vai iniciar após o banco de dados estar de pé
+  admin-frontend:
+      build:
+        context: ./ponto-web # Caminho para a pasta onde está o Dockerfile do Vue 3
+        dockerfile: Dockerfile
+      container_name: admin_ponto_frontend
+      restart: always
+      ports:
+        - "8080:80" # Você acessará o painel administrativo digitando http://localhost:8080 no seu navegador
+      depends_on:
+        - api-backend
+     
+volumes:
+  pgdata:
+    driver: local

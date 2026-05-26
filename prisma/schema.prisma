@@ -1,0 +1,97 @@
+datasource db {
+  provider = "postgresql"
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// Definição dos perfis de acesso
+enum Perfil {
+  ADMIN
+  FUNCIONARIO
+}
+
+// Modelo de Usuários (Administradores e Funcionários)
+model Usuario {
+  id            String        @id @default(uuid())
+  nome          String
+  cpf           String        @unique
+  senhaHash     String // Senha criptografada para acesso web dos admins/funcionários
+  perfil        Perfil        @default(FUNCIONARIO)
+  logs          LogAuditoria[]
+  
+  // Relacionamento com a tabela de horários (opcional se for apenas admin)
+  horarioBaseId String?
+  horarioBase   Horario?      @relation(fields: [horarioBaseId], references: [id])
+  
+  // Relação de um para muitos com as batidas de ponto
+  batidas       BatidaPonto[]
+  
+  createdAt     DateTime      @default(now()) @map("created_at")
+  updatedAt     DateTime      @updatedAt @map("updated_at")
+
+  @@map("usuarios")
+}
+
+// Modelo para as Jornadas/Horários de Trabalho
+model Horario {
+  id                   String   @id @default(uuid())
+  descricao            String
+  horaEntradaPadrao    String   @default("08:00")
+  horaSaidaPadrao      String   @default("17:00")
+  
+  // SÁBADO
+  trabalhaSabado       Boolean  @default(false)
+  horaEntradaSabado    String   @default("08:00")
+  horaSaidaSabado      String   @default("12:00")
+  
+  // DOMINGO UNIFICADO
+  trabalhaDomingo      Boolean  @default(false)
+  horaEntradaDomingo   String   @default("08:00")
+  horaSaidaDomingo     String   @default("12:00")
+  
+  // DOMINGOS ALTERNADOS
+  trabalhaDomingoAlt   Boolean  @default(false)
+  domingoInicioImpar   Boolean  @default(true)
+  
+  usuarios             Usuario[]
+  createdAt            DateTime @default(now())
+}
+
+// Modelo para os registros de Ponto Eletrônico
+model BatidaPonto {
+  id         String   @id @default(uuid())
+  usuarioId  String   @map("usuario_id")
+  usuario    Usuario  @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+  
+  dataHora   DateTime @default(now()) @map("data_hora")
+  fotoBase64 String   @db.Text @map("foto_base64") // Tipo Text no Postgres para strings grandes
+  latitude   Float
+  longitude  Float
+  
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@map("batidas_ponto")
+}
+
+// Modelo de Logs de Auditoria
+model LogAuditoria {
+  id              String   @id @default(uuid())
+  
+  // Quem realizou a ação (pode ser nulo caso a ação seja disparada pelo próprio sistema)
+  usuarioAcaoId   String?  @map("usuario_acao_id")
+  usuarioAcao     Usuario? @relation(fields: [usuarioAcaoId], references: [id])
+  
+  acao            String   // Ex: "LOGIN", "CREATE", "UPDATE", "DELETE"
+  entidade        String   // Ex: "Usuario", "Horario", "BatidaPonto", "Auth"
+  
+  // Usamos JSON para guardar o estado completo do registro antes e depois da alteração
+  dadosAnteriores Json?    @map("dados_anteriores") 
+  dadosNovos      Json?    @map("dados_novos")      
+  
+  ipOrigem        String?  @map("ip_origem") // Útil para rastrear de onde veio a requisição
+  dataHora        DateTime @default(now()) @map("data_hora")
+
+  @@map("logs_auditoria")
+}
