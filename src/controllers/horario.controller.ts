@@ -5,7 +5,7 @@ export const HorarioController = {
   // 1. CRIAR JORNADA
   async criarHorario(req: Request, res: Response): Promise<void> {
     try {
-      const { descricao, regrasDias, trabalhaDomingoAlt, domingoInicioImpar } = req.body;
+      const { descricao, tipoEscala, regrasDias, trabalhaDomingoAlt, domingoInicioImpar } = req.body;
 
 
 
@@ -21,6 +21,7 @@ export const HorarioController = {
         prisma.horario.create({
           data: {
             descricao,
+            tipoEscala: tipoEscala || 'SEMANAL',
             horaEntradaPadrao: regraSegunda.entrada,
             horaSaidaPadrao: regraSegunda.saida,
             
@@ -79,7 +80,7 @@ export const HorarioController = {
   async atualizarHorario(req: Request, res: Response): Promise<void> {
     try {
       const { id } = req.params;
-      const { descricao, regrasDias, trabalhaDomingoAlt, domingoInicioImpar } = req.body;
+      const { descricao, tipoEscala, regrasDias, trabalhaDomingoAlt, domingoInicioImpar } = req.body;
 
       const administradorId = req.usuario?.id;
       const ip = req.ip || req.socket.remoteAddress;
@@ -101,6 +102,7 @@ export const HorarioController = {
           where: { id },
           data: {
             descricao: descricao || horarioExistente.descricao,
+            tipoEscala: tipoEscala || horarioExistente.tipoEscala,
             ...(interrogadoSegunda && {
               horaEntradaPadrao: interrogadoSegunda.entrada,
               horaSaidaPadrao: interrogadoSegunda.saida

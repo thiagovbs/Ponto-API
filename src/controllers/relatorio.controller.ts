@@ -91,7 +91,7 @@ export const RelatorioController = {
     }
   },
 
-  // 2. RELATÓRIO MENSAL E DASHBOARD POR FUNCIONÁRIO
+// 2. RELATÓRIO MENSAL E DASHBOARD POR FUNCIONÁRIO (Atualizado para Escala Alternada)
   async relatorioMensalPorFuncionario(req: Request, res: Response): Promise<void> {
     try {
       const { id } = req.params;
@@ -111,7 +111,6 @@ export const RelatorioController = {
       const inicioMes = new Date(ano, mes - 1, 1);
       const fimMes = new Date(ano, mes, 0, 23, 59, 59);
 
-      // Buscamos as batidas trazendo explicitamente latitude e longitude da tabela BatidaPonto
       const batidas = await prisma.batidaPonto.findMany({
         where: {
           usuarioId: id,
@@ -120,7 +119,6 @@ export const RelatorioController = {
         orderBy: { dataHora: 'asc' }
       });
 
-      // Agrupa as instâncias dos objetos de batida completos por dia
       const batidasAgrupadasPorDia: { [key: string]: any[] } = {};
       batidas.forEach(b => {
         const dataStr = b.dataHora.toISOString().split('T')[0];
@@ -139,10 +137,11 @@ export const RelatorioController = {
         const dataCorrente = new Date(ano, mes - 1, dia);
         const dataCorrenteStr = dataCorrente.toISOString().split('T')[0];
         
-        const diaDaSemana = dataCorrente.getDay(); 
+        const diaDaSemana = dataCorrente.getDay();
         const numeroSemana = obterNumeroSemanaAno(dataCorrente);
         const ehSemanaImpar = numeroSemana % 2 !== 0;
 
+        // Valores Default de Fallback
         let trabalhaNesseDia = diaDaSemana !== 0 && diaDaSemana !== 6;
         let entradaEsperada = "08:00";
         let saidaEsperada = "17:00";
@@ -150,49 +149,75 @@ export const RelatorioController = {
 
         if (usuario.horarioBase) {
           entradaEsperada = usuario.horarioBase.horaEntradaPadrao;
-          saidaEsperada = usuario.horarioBase.horaSaidaPadrao || usuario.horarioBase.horaSaidaPadrao;
+          saidaEsperada = usuario.horarioBase.horaSaidaPadrao;
           minutosEsperadosNoDia = transformarEmMinutos(saidaEsperada) - transformarEmMinutos(entradaEsperada);
 
-          if (diaDaSemana === 6) {
-            trabalhaNesseDia = usuario.horarioBase.trabalhaSabado;
-            if (trabalhaNesseDia) {
-              entradaEsperada = usuario.horarioBase.horaEntradaSabado;
-              saidaEsperada = usuario.horarioBase.horaSaidaSabado;
-              minutosEsperadosNoDia = transformarEmMinutos(saidaEsperada) - transformarEmMinutos(entradaEsperada);
+          // 🛡️ NOVO: BIFURCAÇÃO SE FOR ESCALA ALTERNADA (12x24, 12x36, etc.)
+          if (usuario.horarioBase.tipoEscala === 'ALTERNADA') {
+            // Usamos a data de criação do usuário (admissão) como ponto de partida da escala
+            const dataAncora = new Date(usuario.createdAt);
+            
+            const inicio = new Date(dataAncora.setHours(0, 0, 0, 0));
+            const atual = new Date(dataCorrente.setHours(0, 0, 0, 0));
+
+            const diferencaTempo = atual.getTime() - inicio.getTime();
+            const diferencaDias = Math.floor(diferencaTempo / (1000 * 60 * 60 * 24));
+
+            if (diferencaDias >= 0) {
+              // Lógica de Revezamento: Trabalha no dia 0, Folga no dia 1, Trabalha no dia 2...
+              trabalhaNesseDia = diferencaDias % 2 === 0;
             } else {
+              trabalhaNesseDia = false;
+            }
+
+            // Força os minutos esperados se for dia de plantão, ou zero se for folga
+            if (!trabalhaNesseDia) {
               minutosEsperadosNoDia = 0;
             }
-          }
-
-          if (diaDaSemana === 0) {
-            if (usuario.horarioBase.trabalhaDomingo) {
-              entradaEsperada = usuario.horarioBase.horaEntradaDomingo;
-              saidaEsperada = usuario.horarioBase.horaSaidaDomingo;
-
-              if (usuario.horarioBase.trabalhaDomingoAlt) {
-                if (usuario.horarioBase.domingoInicioImpar) {
-                  trabalhaNesseDia = ehSemanaImpar;
-                } else {
-                  trabalhaNesseDia = !ehSemanaImpar;
-                }
-              } else {
-                trabalhaNesseDia = true;
-              }
-
+          } 
+          // 📜 MANTÉM COMPATIBILIDADE SE FOR A ESCALA SEMANAL PADRÃO
+          else {
+            if (diaDaSemana === 6) {
+              trabalhaNesseDia = usuario.horarioBase.trabalhaSabado;
               if (trabalhaNesseDia) {
+                entradaEsperada = usuario.horarioBase.horaEntradaSabado || entradaEsperada;
+                saidaEsperada = usuario.horarioBase.horaSaidaSabado || saidaEsperada;
                 minutosEsperadosNoDia = transformarEmMinutos(saidaEsperada) - transformarEmMinutos(entradaEsperada);
               } else {
                 minutosEsperadosNoDia = 0;
               }
-            } else {
-              trabalhaNesseDia = false;
-              minutosEsperadosNoDia = 0;
+            }
+
+            if (diaDaSemana === 0) {
+              if (usuario.horarioBase.trabalhaDomingo) {
+                entradaEsperada = usuario.horarioBase.horaEntradaDomingo || entradaEsperada;
+                saidaEsperada = usuario.horarioBase.horaSaidaDomingo || saidaEsperada;
+
+                if (usuario.horarioBase.trabalhaDomingoAlt) {
+                  if (usuario.horarioBase.domingoInicioImpar) {
+                    trabalhaNesseDia = ehSemanaImpar;
+                  } else {
+                    trabalhaNesseDia = !ehSemanaImpar;
+                  }
+                } else {
+                  trabalhaNesseDia = true;
+                }
+
+                if (trabalhaNesseDia) {
+                  minutosEsperadosNoDia = transformarEmMinutos(saidaEsperada) - transformarEmMinutos(entradaEsperada);
+                } else {
+                  minutosEsperadosNoDia = 0;
+                }
+              } else {
+                trabalhaNesseDia = false;
+                minutosEsperadosNoDia = 0;
+              }
             }
           }
         }
 
         const batidasDoDia = batidasAgrupadasPorDia[dataCorrenteStr] || [];
-        let minutosTrabalhadosNoDia = 0;
+        let minutesTrabalhadosNoDia = 0;
         let saldoDoDiaMinutos = 0;
         let status = 'Regular';
 
@@ -200,16 +225,16 @@ export const RelatorioController = {
           for (let i = 0; i < batidasDoDia.length; i += 2) {
             if (batidasDoDia[i + 1]) {
               const diffMs = batidasDoDia[i + 1].dataHora.getTime() - batidasDoDia[i].dataHora.getTime();
-              minutosTrabalhadosNoDia += Math.floor(diffMs / 1000 / 60);
+              minutesTrabalhadosNoDia += Math.floor(diffMs / 1000 / 60);
             }
           }
           
           if (trabalhaNesseDia) {
-            saldoDoDiaMinutos = minutosTrabalhadosNoDia - minutosEsperadosNoDia;
+            saldoDoDiaMinutos = minutesTrabalhadosNoDia - minutosEsperadosNoDia;
             if (saldoDoDiaMinutos < -10) status = 'Atraso';
             if (saldoDoDiaMinutos > 10) status = 'Hora Extra';
           } else {
-            saldoDoDiaMinutos = minutosTrabalhadosNoDia;
+            saldoDoDiaMinutos = minutesTrabalhadosNoDia;
             status = 'Trabalho em Folga';
           }
         } else if (batidasDoDia.length === 1) {
@@ -228,7 +253,6 @@ export const RelatorioController = {
 
         saldoBancoHorasMinutos += saldoDoDiaMinutos;
 
-        // MODIFICAÇÃO CHAVE: Mapeamos devolvendo um objeto com dados geográficos crus
         const batidasFormatadasComCoordenadas = batidasDoDia.map(b => ({
           hora: b.dataHora.toLocaleTimeString('pt-BR', { 
             hour: '2-digit', 
@@ -242,8 +266,8 @@ export const RelatorioController = {
         historicoDias.push({
           data: dataCorrenteStr,
           status,
-          batidas: batidasFormatadasComCoordenadas, // Enviado como [{ hora, latitude, longitude }]
-          horasTrabalhadas: formatarMinutosParaHoras(minutosTrabalhadosNoDia),
+          batidas: batidasFormatadasComCoordenadas,
+          horasTrabalhadas: formatarMinutosParaHoras(minutesTrabalhadosNoDia),
           saldoDoDia: formatarMinutosParaHoras(saldoDoDiaMinutos)
         });
       }
