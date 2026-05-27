@@ -1,10 +1,9 @@
 import { Request, Response } from 'express';
 import { prisma } from '../config/prisma';
-import { AuthRequest } from '../middlewares/auth.middleware';
 import bcrypt from 'bcrypt';
 
 export const UsuarioController = {
-  async criarUsuario(req: AuthRequest, res: Response): Promise<void> {
+  async criarUsuario(req: Request, res: Response): Promise<void> {
     try {
       const { nome, cpf, senha, perfil, horarioBaseId } = req.body;
       
