@@ -63,7 +63,7 @@ export const HorarioController = {
   },
 
   // 2. LISTAR JORNADAS
-  async listarHorarios(req: AuthRequest, res: Response): Promise<void> {
+  async listarHorarios(req: Request, res: Response): Promise<void> {
     try {
       const horarios = await prisma.horario.findMany({
         orderBy: { descricao: 'asc' }
@@ -76,7 +76,7 @@ export const HorarioController = {
   }, 
 
   // 3. ATUALIZAR JORNADA
-  async atualizarHorario(req: AuthRequest, res: Response): Promise<void> {
+  async atualizarHorario(req: Request, res: Response): Promise<void> {
     try {
       const { id } = req.params;
       const { descricao, regrasDias, trabalhaDomingoAlt, domingoInicioImpar } = req.body;
