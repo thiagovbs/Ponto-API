@@ -3,8 +3,8 @@
     "target": "es2022",
     "module": "commonjs",
     "lib": ["es2022"],
-    "rootDir": "./src",                  /* O TypeScript sabe que o código começa em /src */
-    "outDir": "./dist",                 /* Ele vai criar os arquivos direto dentro de /dist */
+    "rootDir": "./src",                  
+    "outDir": "./dist",                 
     "allowJs": true,
     "checkJs": false,
     "strict": false,
@@ -12,6 +12,6 @@
     "noUnusedParameters": false,
     "skipLibCheck": true
   },
-  "include": ["src/**/*", "prisma/**/*"],
-  "exclude": ["node_modules", "dist"]    /* Removemos a menção ao ponto-web */
+  "include": ["src/**/*"],              
+  "exclude": ["node_modules", "dist", "prisma"] 
 }
