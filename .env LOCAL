@@ -1,3 +1,0 @@
-DATABASE_URL="postgresql://root:rootpassword@localhost:5434/ponto_db?schema=public"
-PORT=3003
-JWT_SECRET="037685a89c2609565a2021b7cf6f973e0a7c52b212a86746f6c4f793f2492fa1"
