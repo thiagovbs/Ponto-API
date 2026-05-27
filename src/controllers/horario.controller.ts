@@ -1,4 +1,4 @@
-import { Response } from 'express';
+import { Request, Response } from 'express';
 import { prisma } from '../config/prisma';
 import { AuthRequest } from '../middlewares/auth.middleware'; // 🪛 Importa a sua requisição tipada do JWT
 
@@ -8,7 +8,9 @@ export const HorarioController = {
     try {
       const { descricao, regrasDias, trabalhaDomingoAlt, domingoInicioImpar } = req.body;
 
-      const administradorId = req.usuario?.id; // 🪛 Captura o ID do admin logado
+      const reqAutenticada = req as AuthRequest;
+
+      const administradorId = reqAutenticada.usuario?.id; // 🪛 Captura o ID do admin logado
       const ip = req.ip || req.socket.remoteAddress; // 🪛 Captura o IP de origem da requisição
 
       const regraSegunda = regrasDias?.find((d: any) => d.numero === 1) || { entrada: "08:00", saida: "17:00" };
