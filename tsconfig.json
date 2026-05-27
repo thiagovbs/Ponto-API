@@ -8,6 +8,7 @@
     "allowJs": true,
     "checkJs": false,
     "strict": false,
+    "noImplicitAny": false,
     "noUnusedLocals": false,
     "noUnusedParameters": false,
     "skipLibCheck": true
