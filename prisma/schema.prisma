@@ -12,6 +12,11 @@ enum Perfil {
   FUNCIONARIO
 }
 
+enum TipoEscala {
+  SEMANAL      // Regime padrão (Segunda a Sexta, Sábado, Domingo fixos)
+  ALTERNADA    // Regime 12x24, 12x36, etc. (Trabalha um dia, folga no outro)
+}
+
 // Modelo de Usuários (Administradores e Funcionários)
 model Usuario {
   id            String        @id @default(uuid())
@@ -38,6 +43,7 @@ model Usuario {
 model Horario {
   id                   String   @id @default(uuid())
   descricao            String
+  tipoEscala           TipoEscala   @default(SEMANAL)
   horaEntradaPadrao    String   @default("08:00")
   horaSaidaPadrao      String   @default("17:00")
   
