@@ -35,7 +35,7 @@ export const prisma = prismaBase.$extends({
               data: {
                 acao: operation.toUpperCase(),
                 entidade: model,
-                dadosNovos: operation !== 'delete' ? (args.data as any) : null,
+                dadosNovos: operation !== 'delete' ? ((args as any)?.data) : null,
                 // O usuarioAcaoId pode ser mapeado aqui no futuro se injetado no contexto
               },
             });
