@@ -4,53 +4,54 @@ import { prisma } from '../config/prisma';
 export const AuditoriaController = {
   async listarLogs(req: Request, res: Response): Promise<void> {
     try {
-      
+      // 1. Captura e trata os parâmetros enviados pelo Vue.js
       const pagina = parseInt(req.query.pagina as string) || 1;
       const limite = parseInt(req.query.limite as string) || 20;
-      const acao = req.query.acao as string;
-      const busca = req.query.busca as string; // Para pesquisar nome do usuário
+      const busca = req.query.busca as string;
+      const dataInicio = req.query.dataInicio as string;
+      const dataFim = req.query.dataFim as string;
 
-      
-      const dataSeteDiasAtras = new Date();
-      dataSeteDiasAtras.setDate(dataSeteDiasAtras.getDate() - 7);
-      dataSeteDiasAtras.setHours(0, 0, 0, 0); // Começo do dia
+      const pular = (pagina - 1) * limite;
 
-      const dataInicioQuery = req.query.dataInicio ? new Date(req.query.dataInicio as string) : dataSeteDiasAtras;
-      const dataFimQuery = req.query.dataFim ? new Date(req.query.dataFim as string) : new Date();
+      // 2. Monta as condições dinâmicas do WHERE (Filtros)
+      const whereClause: any = {};
 
-      const skip = (pagina - 1) * limite;
-
-      
-      const whereClause: any = {
-        dataHora: {
-          gte: dataInicioQuery,
-          lte: dataFimQuery
+      // Filtro por período de datas
+      if (dataInicio || dataFim) {
+        whereClause.dataHora = {};
+        if (dataInicio) {
+          // Ajusta para o início do dia
+          whereClause.dataHora.gte = new Date(`${dataInicio}T00:00:00.000Z`);
         }
-      };
-
-      // Se filtrou por uma ação específica
-      if (acao && acao.trim() !== '') {
-        whereClause.acao = acao;
+        if (dataFim) {
+          // Ajusta para o fim do dia
+          whereClause.dataHora.lte = new Date(`${dataFim}T23:59:59.999Z`);
+        }
       }
 
-      // Se digitou algo na busca por texto (Nome do usuário ou detalhes)
-      if (busca && busca.trim() !== '') {
+      // Filtro por termo de busca (Procura na Ação, Entidade ou no nome do Usuário)
+      if (busca) {
         whereClause.OR = [
           { acao: { contains: busca, mode: 'insensitive' } },
-          { detalhes: { contains: busca, mode: 'insensitive' } },
-          { usuarioAcao: { nome: { contains: busca, mode: 'insensitive' } } }
+          { entidade: { contains: busca, mode: 'insensitive' } },
+          {
+            usuarioAcao: {
+              nome: { contains: busca, mode: 'insensitive' }
+            }
+          }
         ];
       }
 
-      // Executa a paginação e a contagem em uma única transação no banco
-      const [logs, totalRegistros] = await prisma.$transaction([
+      // 3. Executa em paralelo a contagem total e a busca paginada (Melhor performance)
+      const [totalLogs, logs] = await prisma.$transaction([
+        prisma.logAuditoria.count({ where: whereClause }),
         prisma.logAuditoria.findMany({
           where: whereClause,
+          skip: pular,
+          take: limite,
           orderBy: { 
             dataHora: 'desc' 
           },
-          skip: skip,
-          take: limite,
           include: {
             usuarioAcao: {
               select: {
@@ -59,17 +60,17 @@ export const AuditoriaController = {
               }
             }
           }
-        }),
-        prisma.logAuditoria.count({ where: whereClause })
+        })
       ]);
 
-      // Retorna os dados envelopados com metadados de paginação
+      const paginasTotais = Math.ceil(totalLogs / limite) || 1;
+
+      // 4. Retorna no formato exato esperado pela AuditoriaView.vue
       res.status(200).json({
-        total: totalRegistros,
-        pagina: pagina,
-        limite: limite,
-        paginasTotais: Math.ceil(totalRegistros / limite),
-        logs: logs
+        logs,
+        total: totalLogs,
+        paginasTotais,
+        paginaAtual: pagina
       });
 
     } catch (error) {

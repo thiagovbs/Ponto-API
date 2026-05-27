@@ -1,11 +1,15 @@
-import { Request, Response } from 'express';
+import { Response } from 'express';
 import { prisma } from '../config/prisma';
+import { AuthRequest } from '../middlewares/auth.middleware';
 import bcrypt from 'bcrypt';
 
 export const UsuarioController = {
-  async criarUsuario(req: Request, res: Response): Promise<void> {
+  async criarUsuario(req: AuthRequest, res: Response): Promise<void> {
     try {
       const { nome, cpf, senha, perfil, horarioBaseId } = req.body;
+      
+      const administradorId = req.usuario?.id;
+      const ip = req.ip || req.socket.remoteAddress; // 🪛 Captura o IP de origem do admin [cite: 10]
 
       // 1. Validação básica
       if (!nome || !cpf || !senha) {
@@ -23,20 +27,39 @@ export const UsuarioController = {
         return;
       }
 
-      // 3. Criptografa a senha (o número 10 é o "salt rounds", um bom padrão de segurança)
+      // 3. Criptografa a senha [cite: 1]
       const salt = await bcrypt.genSalt(10);
       const senhaHash = await bcrypt.hash(senha, salt);
 
-      // 4. Salva no banco de dados
-      const novoUsuario = await prisma.usuario.create({
-        data: {
-          nome,
-          cpf,
-          senhaHash,
-          perfil: perfil || 'FUNCIONARIO', // Define FUNCIONARIO como padrão se não for enviado
-          horarioBaseId: horarioBaseId || null,
-        }
-      });
+      // 4. Salva no banco de dados e registra a auditoria usando uma Transação
+      const [novoUsuario] = await prisma.$transaction([
+        prisma.usuario.create({
+          data: {
+            nome,
+            cpf,
+            senhaHash,
+            perfil: perfil || 'FUNCIONARIO',
+            horarioBaseId: horarioBaseId || null,
+          }
+        }),
+        
+        // 🛡️ GRAVAÇÃO COMPATÍVEL COM O SEU SCHEMA.PRISMA 
+        prisma.logAuditoria.create({
+          data: {
+            acao: 'CREATE', // Padrão recomendado pelo seu schema comment 
+            entidade: 'Usuario', // Campo obrigatório identificado 
+            usuarioAcaoId: administradorId || null,
+            ipOrigem: ip || null, // Rastreabilidade preenchida [cite: 10]
+            dadosAnteriores: {}, // Sem dados anteriores por ser criação [cite: 8]
+            dadosNovos: { // Estado completo do novo usuário salvo como JSON legítimo [cite: 9]
+              nome,
+              cpf,
+              perfil: perfil || 'FUNCIONARIO',
+              horarioBaseId: horarioBaseId || null
+            }
+          }
+        })
+      ]);
 
       // 5. Remove a senha do objeto de retorno por segurança
       const { senhaHash: _, ...usuarioSemSenha } = novoUsuario;
@@ -52,7 +75,7 @@ export const UsuarioController = {
     }
   },
 
-  async listarUsuarios(req: Request, res: Response): Promise<void> {
+  async listarUsuarios(req: AuthRequest, res: Response): Promise<void> {
     try {
       const usuarios = await prisma.usuario.findMany({
         select: {
@@ -63,7 +86,7 @@ export const UsuarioController = {
           horarioBaseId: true,
           createdAt: true,
         },
-        orderBy: { nome: 'asc' } // Ordena alfabeticamente
+        orderBy: { nome: 'asc' }
       });
 
       res.status(200).json(usuarios);
@@ -73,31 +96,63 @@ export const UsuarioController = {
     }
   },
 
-   async atualizarUsuario(req: Request, res: Response) {
+  async atualizarUsuario(req: AuthRequest, res: Response): Promise<any> {
     const { id } = req.params;
-    const { nome, cpf, perfil, senha } = req.body;
+    const { nome, cpf, perfil, senha, horarioBaseId } = req.body;
+    
+    const administradorId = req.usuario?.id;
+    const ip = req.ip || req.socket.remoteAddress;
 
     try {
-      // 1. Criamos o objeto com os dados básicos que sempre serão atualizados
+      // 1. Busca o estado atual do usuário ANTES da alteração (Essencial para a sua auditoria) 
+      const usuarioAntes = await prisma.usuario.findUnique({
+        where: { id },
+        select: { nome: true, cpf: true, perfil: true, horarioBaseId: true }
+      });
+
+      if (!usuarioAntes) {
+        return res.status(404).json({ erro: 'Usuário não encontrado.' });
+      }
+
+      // 2. Monta os dados básicos de atualização
       const dadosAtualizacao: any = {
         nome,
         cpf,
-        perfil
+        perfil,
+        horarioBaseId: horarioBaseId || null
       };
 
-      // 2. Verifica se uma nova senha foi enviada
       if (senha && senha.trim() !== '') {
-        // Se a senha foi preenchida, gera o novo Hash antes de salvar
         const salt = await bcrypt.genSalt(10);
         dadosAtualizacao.senhaHash = await bcrypt.hash(senha, salt);
       }
 
-      // 3. Executa o update no banco passando apenas o que mudou
-      const usuarioAtualizado = await prisma.usuario.update({
-        where: { id },
-        data: dadosAtualizacao,
-        select: { id: true, nome: true, cpf: true, perfil: true } // Não retorna a senha no JSON
-      });
+      // 3. Executa a atualização e a auditoria de forma atômica
+      const [usuarioAtualizado] = await prisma.$transaction([
+        prisma.usuario.update({
+          where: { id },
+          data: dadosAtualizacao,
+          select: { id: true, nome: true, cpf: true, perfil: true, horarioBaseId: true }
+        }),
+
+        // 🛡️ GRAVAÇÃO COMPATÍVEL COM O SEU SCHEMA.PRISMA 
+        prisma.logAuditoria.create({
+          data: {
+            acao: 'UPDATE', 
+            entidade: 'Usuario',
+            usuarioAcaoId: administradorId || null,
+            ipOrigem: ip || null,
+            // Comparamos o estado do objeto antes e depois da modificação perfeitamente 
+            dadosAnteriores: usuarioAntes as any, // Capturado antes do update [cite: 8]
+            dadosNovos: { // Novo estado pós update [cite: 9]
+              nome,
+              cpf,
+              perfil,
+              horarioBaseId: horarioBaseId || null
+            }
+          }
+        })
+      ]);
 
       return res.json(usuarioAtualizado);
     } catch (error) {
@@ -105,5 +160,4 @@ export const UsuarioController = {
       return res.status(500).json({ erro: 'Erro ao atualizar o usuário.' });
     }
   }
-
 };
