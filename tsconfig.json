@@ -3,15 +3,15 @@
     "target": "es2022",
     "module": "commonjs",
     "lib": ["es2022"],
-    "rootDir": "./src",                  /* 🪛 Diz que seu código fonte está dentro de /src */
-    "outDir": "./dist",                 /* 🪛 Garante que a saída vai para a pasta dist */
+    "rootDir": "./src",                  /* O TypeScript sabe que o código começa em /src */
+    "outDir": "./dist",                 /* Ele vai criar os arquivos direto dentro de /dist */
     "allowJs": true,
     "checkJs": false,
-    "strict": false,                    /* Evita travas estritas em produção */
-    "noUnusedLocals": false,            /* Ignora variáveis não usadas */
-    "noUnusedParameters": false,        /* Ignora parâmetros não usados */
+    "strict": false,
+    "noUnusedLocals": false,
+    "noUnusedParameters": false,
     "skipLibCheck": true
   },
   "include": ["src/**/*", "prisma/**/*"],
-  "exclude": ["node_modules", "dist", "ponto-web", "ponto_mobile"] /* Ignora o Vue 3 para não estourar a memória */
+  "exclude": ["node_modules", "dist"]    /* Removemos a menção ao ponto-web */
 }
