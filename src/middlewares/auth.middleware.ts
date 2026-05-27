@@ -12,6 +12,7 @@ export interface AuthRequest extends Request {
 export const AuthMiddleware = {
   // Middleware 1: Verifica se o usuário está logado (Token Válido)
   verificarToken(req: AuthRequest, res: Response, next: NextFunction): void {
+    // @ts-ignore
     const authHeader = req.headers.authorization;
 
     if (!authHeader) {

@@ -150,7 +150,7 @@ export const RelatorioController = {
 
         if (usuario.horarioBase) {
           entradaEsperada = usuario.horarioBase.horaEntradaPadrao;
-          saidaEsperada = usuario.horarioBase.horaSuidaPadrao || usuario.horarioBase.horaSaidaPadrao;
+          saidaEsperada = usuario.horarioBase.horaSaidaPadrao || usuario.horarioBase.horaSaidaPadrao;
           minutosEsperadosNoDia = transformarEmMinutos(saidaEsperada) - transformarEmMinutos(entradaEsperada);
 
           if (diaDaSemana === 6) {
