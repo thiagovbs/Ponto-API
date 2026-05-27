@@ -74,7 +74,7 @@ export const UsuarioController = {
     }
   },
 
-  async listarUsuarios(req: AuthRequest, res: Response): Promise<void> {
+  async listarUsuarios(req: Request, res: Response): Promise<void> {
     try {
       const usuarios = await prisma.usuario.findMany({
         select: {
@@ -95,7 +95,7 @@ export const UsuarioController = {
     }
   },
 
-  async atualizarUsuario(req: AuthRequest, res: Response): Promise<any> {
+  async atualizarUsuario(req: Request, res: Response): Promise<any> {
     const { id } = req.params;
     const { nome, cpf, perfil, senha, horarioBaseId } = req.body;
     
