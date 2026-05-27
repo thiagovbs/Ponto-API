@@ -5,13 +5,14 @@ export const PontoController = {
   async registrarPonto(req: Request, res: Response): Promise<void> {
     try {
       const { usuarioId, fotoBase64, latitude, longitude } = req.body;
+      const ip = req.ip || req.socket.remoteAddress;
 
       if (!usuarioId || !fotoBase64 || !latitude || !longitude) {
         res.status(400).json({ erro: 'Todos os campos são obrigatórios' });
         return;
       }
 
-      // 1. Verifica se o usuário existe
+      // 1. Verifica se o funcionário existe no banco
       const usuario = await prisma.usuario.findUnique({
         where: { id: usuarioId },
       });
@@ -21,19 +22,40 @@ export const PontoController = {
         return;
       }
 
-      // 2. Grava a batida de ponto
-      const batida = await prisma.batidaPonto.create({
-        data: {
-          usuarioId,
-          fotoBase64,
-          latitude,
-          longitude,
-        },
-      });
+      // 2. Transação isolada e explicitamente tipada para o TypeScript resolver os operadores
+      const resultado = await prisma.$transaction([
+        prisma.batidaPonto.create({
+          data: {
+            usuarioId,
+            fotoBase64,
+            latitude,
+            longitude,
+          },
+        }),
+        prisma.logAuditoria.create({
+          data: {
+            acao: 'CREATE',
+            entidade: 'BatidaPonto',
+            usuarioAcaoId: usuarioId,
+            ipOrigem: ip || null,
+            dadosAnteriores: {},
+            dadosNovos: {
+              usuarioNome: usuario.nome,
+              cpf: usuario.cpf,
+              latitude,
+              longitude,
+              info: "Marcação de ponto efetuada via Mobile."
+            }
+          }
+        })
+      ]);
+
+      // Captura o primeiro elemento do array retornado (a batida criada)
+      const batidaCriada = resultado[0];
 
       res.status(201).json({
         mensagem: 'Ponto registrado com sucesso',
-        dataHora: batida.dataHora,
+        dataHora: batidaCriada.dataHora,
       });
 
     } catch (error) {
@@ -52,7 +74,6 @@ export const PontoController = {
           longitude: true,
           createdAt: true,
           usuarioId: true,
-          // Omitimos a fotoBase64 para a listagem ficar leve
           usuario: {
             select: {
               nome: true,
@@ -60,7 +81,7 @@ export const PontoController = {
             }
           }
         },
-        orderBy: { dataHora: 'desc' } // Mostra as mais recentes primeiro
+        orderBy: { dataHora: 'desc' }
       });
 
       res.status(200).json(batidas);
@@ -69,5 +90,4 @@ export const PontoController = {
       res.status(500).json({ erro: 'Erro interno ao buscar batidas de ponto.' });
     }
   }
-
 };

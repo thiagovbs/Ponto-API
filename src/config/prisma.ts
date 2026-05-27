@@ -18,7 +18,7 @@ const pool = new Pool({ connectionString });
 const adapter = new PrismaPg(pool);
 
 // 4. Inicializa o cliente base do Prisma usando o driver do PG
-const prismaBase = new PrismaClient({ adapter });
+const prismaBase = new PrismaClient({adapter});
 
 // 5. Extensão de Auditoria Automática Unificada
 export const prisma = prismaBase.$extends({
