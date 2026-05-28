@@ -82,7 +82,9 @@ export const RelatorioController = {
           id: f.id,
           nome: f.usuario.nome,
           hora: f.dataHora.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
-          foto: f.fotoBase64
+          foto: f.fotoBase64,
+          latitude: f.latitude,
+          longitude: f.longitude
         }))
       });
     } catch (error) {
