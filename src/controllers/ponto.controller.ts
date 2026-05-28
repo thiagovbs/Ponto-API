@@ -4,10 +4,10 @@ import { prisma } from '../config/prisma';
 export const PontoController = {
   async registrarPonto(req: Request, res: Response): Promise<void> {
     try {
-      const { usuarioId, fotoBase64, latitude, longitude } = req.body;
+      const { usuarioId, fotoBase64, latitude, longitude, dataHora } = req.body;
       const ip = req.ip || req.socket.remoteAddress;
 
-      if (!usuarioId || !fotoBase64 || !latitude || !longitude) {
+      if (!usuarioId || !fotoBase64 || !latitude || !longitude || !dataHora) {
         res.status(400).json({ erro: 'Todos os campos são obrigatórios' });
         return;
       }
@@ -30,6 +30,7 @@ export const PontoController = {
             fotoBase64,
             latitude,
             longitude,
+            dataHora: new Date(dataHora),
           },
         }),
         prisma.logAuditoria.create({
@@ -44,6 +45,7 @@ export const PontoController = {
               cpf: usuario.cpf,
               latitude,
               longitude,
+              dataHora,
               info: "Marcação de ponto efetuada via Mobile."
             }
           }
