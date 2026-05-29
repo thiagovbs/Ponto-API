@@ -7,6 +7,6 @@ const relatorioRoutes = Router();
 relatorioRoutes.get('/dashboard', RelatorioController.dashboardGeral);
 
 // Endpoint: GET /api/relatorios/funcionario/:id
-relatorioRoutes.get('/funcionario/:id', RelatorioController.relatorioMensalPorFuncionario);
+relatorioRoutes.get('/funcionario/:usuarioId', RelatorioController.relatorioMensalPorFuncionario);
 
 export { relatorioRoutes };
