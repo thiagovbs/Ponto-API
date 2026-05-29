@@ -22,8 +22,10 @@ model Usuario {
   id            String        @id @default(uuid())
   nome          String
   cpf           String        @unique
-  senhaHash     String // Senha criptografada para acesso web dos admins/funcionários
+  senhaHash     String        // Senha criptografada para acesso web dos admins/funcionários
   perfil        Perfil        @default(FUNCIONARIO)
+  dataInicioEscala DateTime?
+
   logs          LogAuditoria[]
   
   // Relacionamento com a tabela de horários (opcional se for apenas admin)

@@ -81,7 +81,7 @@ export const RelatorioController = {
         feedAtividades: feedAtividades.map(f => ({
           id: f.id,
           nome: f.usuario.nome,
-          hora: f.dataHora.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+          hour: f.dataHora.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Sao_Paulo' }),
           foto: f.fotoBase64,
           latitude: f.latitude,
           longitude: f.longitude
@@ -93,12 +93,14 @@ export const RelatorioController = {
     }
   },
 
-// 2. RELATÓRIO MENSAL E DASHBOARD POR FUNCIONÁRIO (Atualizado para Escala Alternada)
+  // 2. RELATÓRIO MENSAL E DASHBOARD POR FUNCIONÁRIO (LÓGICA CORRIGIDA)
   async relatorioMensalPorFuncionario(req: Request, res: Response): Promise<void> {
     try {
       const { id } = req.params;
       const mes = Number(req.query.mes) || new Date().getMonth() + 1;
       const ano = Number(req.query.ano) || new Date().getFullYear();
+
+      //console.log(`=> ROTA ACESSADA LOCALMENTE | Buscando ID: ${id} | Mês: ${mes} | Ano: ${ano}`);
 
       const usuario = await prisma.usuario.findUnique({
         where: { id },
@@ -110,8 +112,13 @@ export const RelatorioController = {
         return;
       }
 
+      //console.log(`=> BUSCA BANCO | Achou Usuário? ${!!usuario} | Tem Jornada? ${!!usuario?.horarioBase} | Tipo Escala: ${usuario?.horarioBase?.tipoEscala} | Data Início Escala: ${usuario?.dataInicioEscala}`);
+
       const inicioMes = new Date(ano, mes - 1, 1);
       const fimMes = new Date(ano, mes, 0, 23, 59, 59);
+      const totalDiasNoMes2 = fimMes.getDate();
+
+      //console.log(`=> CALCULO DO LAÇO | Total de dias calculados para o mês: ${totalDiasNoMes2}`);
 
       const batidas = await prisma.batidaPonto.findMany({
         where: {
@@ -123,7 +130,12 @@ export const RelatorioController = {
 
       const batidasAgrupadasPorDia: { [key: string]: any[] } = {};
       batidas.forEach(b => {
-        const dataStr = b.dataHora.toISOString().split('T')[0];
+        // 🔥 CORREÇÃO 1: Agrupamento local estável baseado em componentes da data
+        const anoB = b.dataHora.getFullYear();
+        const mesB = String(b.dataHora.getMonth() + 1).padStart(2, '0');
+        const diaB = String(b.dataHora.getDate()).padStart(2, '0');
+        const dataStr = `${anoB}-${mesB}-${diaB}`;
+        
         if (!batidasAgrupadasPorDia[dataStr]) {
           batidasAgrupadasPorDia[dataStr] = [];
         }
@@ -137,13 +149,18 @@ export const RelatorioController = {
       const totalDiasNoMes = fimMes.getDate();
       for (let dia = 1; dia <= totalDiasNoMes; dia++) {
         const dataCorrente = new Date(ano, mes - 1, dia);
-        const dataCorrenteStr = dataCorrente.toISOString().split('T')[0];
+        
+        // 🔥 CORREÇÃO 2: Geração da chave do loop idêntica ao agrupamento (Sem usar ISOString)
+        const anoCStr = dataCorrente.getFullYear();
+        const mesCStr = String(dataCorrente.getMonth() + 1).padStart(2, '0');
+        const diaCStr = String(dataCorrente.getDate()).padStart(2, '0');
+        const dataCorrenteStr = `${anoCStr}-${mesCStr}-${diaCStr}`;
         
         const diaDaSemana = dataCorrente.getDay();
         const numeroSemana = obterNumeroSemanaAno(dataCorrente);
         const ehSemanaImpar = numeroSemana % 2 !== 0;
 
-        // Valores Default de Fallback
+        // Valores Padrão
         let trabalhaNesseDia = diaDaSemana !== 0 && diaDaSemana !== 6;
         let entradaEsperada = "08:00";
         let saidaEsperada = "17:00";
@@ -154,30 +171,39 @@ export const RelatorioController = {
           saidaEsperada = usuario.horarioBase.horaSaidaPadrao;
           minutosEsperadosNoDia = transformarEmMinutos(saidaEsperada) - transformarEmMinutos(entradaEsperada);
 
-          // 🛡️ NOVO: BIFURCAÇÃO SE FOR ESCALA ALTERNADA (12x24, 12x36, etc.)
           if (usuario.horarioBase.tipoEscala === 'ALTERNADA') {
-            // Usamos a data de criação do usuário (admissão) como ponto de partida da escala
-            const dataAncora = new Date(usuario.createdAt);
-            
-            const inicio = new Date(dataAncora.setHours(0, 0, 0, 0));
-            const atual = new Date(dataCorrente.setHours(0, 0, 0, 0));
+            const dataAncora = usuario.dataInicioEscala 
+              ? new Date(usuario.dataInicioEscala) 
+              : new Date(ano, mes - 1, 1);
 
-            const diferencaTempo = atual.getTime() - inicio.getTime();
-            const diferencaDias = Math.floor(diferencaTempo / (1000 * 60 * 60 * 24));
+            const anoA = dataAncora.getUTCFullYear();
+            const mesA = dataAncora.getUTCMonth();
+            const diaA = dataAncora.getUTCDate();
 
+            const anoC = dataCorrente.getFullYear();
+            const mesC = dataCorrente.getMonth();
+            const diaC = dataCorrente.getDate();
+
+            const dataAncoraUTC = Date.UTC(anoA, mesA, diaA);
+            const dataAtualUTC = Date.UTC(anoC, mesC, diaC);
+
+            const diferencaTempo = dataAtualUTC - dataAncoraUTC;
+            const diferencaDias = Math.round(diferencaTempo / (1000 * 60 * 60 * 24));
+
+            // 🎯 CORREÇÃO 3: Posicionamento lógico do cálculo antes da validação
             if (diferencaDias >= 0) {
-              // Lógica de Revezamento: Trabalha no dia 0, Folga no dia 1, Trabalha no dia 2...
               trabalhaNesseDia = diferencaDias % 2 === 0;
             } else {
               trabalhaNesseDia = false;
             }
 
-            // Força os minutos esperados se for dia de plantão, ou zero se for folga
+            //console.log(`Dia: ${dataCorrenteStr} | Distância da Âncora: ${diferencaDias} dias | Trabalha nesse dia? ${trabalhaNesseDia}`);
+
             if (!trabalhaNesseDia) {
               minutosEsperadosNoDia = 0;
             }
           } 
-          // 📜 MANTÉM COMPATIBILIDADE SE FOR A ESCALA SEMANAL PADRÃO
+          // 📜 MANTÉM ESCALA SEMANAL PADRÃO
           else {
             if (diaDaSemana === 6) {
               trabalhaNesseDia = usuario.horarioBase.trabalhaSabado;
@@ -234,7 +260,8 @@ export const RelatorioController = {
           if (trabalhaNesseDia) {
             saldoDoDiaMinutos = minutesTrabalhadosNoDia - minutosEsperadosNoDia;
             if (saldoDoDiaMinutos < -10) status = 'Atraso';
-            if (saldoDoDiaMinutos > 10) status = 'Hora Extra';
+            else if (saldoDoDiaMinutos > 10) status = 'Hora Extra';
+            else status = 'Regular';
           } else {
             saldoDoDiaMinutos = minutesTrabalhadosNoDia;
             status = 'Trabalho em Folga';
