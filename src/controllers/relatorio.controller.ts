@@ -81,7 +81,7 @@ export const RelatorioController = {
         feedAtividades: feedAtividades.map(f => ({
           id: f.id,
           nome: f.usuario.nome,
-          hour: f.dataHora.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Sao_Paulo' }),
+          hora: f.dataHora.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Sao_Paulo' }),
           foto: f.fotoBase64,
           latitude: f.latitude,
           longitude: f.longitude
@@ -93,14 +93,12 @@ export const RelatorioController = {
     }
   },
 
-  // 2. RELATÓRIO MENSAL E DASHBOARD POR FUNCIONÁRIO (LÓGICA CORRIGIDA)
+  // 2. RELATÓRIO MENSAL E DASHBOARD POR FUNCIONÁRIO (LÓGICA DO ALMOÇO + AUDITORIA CORRIGIDA)
   async relatorioMensalPorFuncionario(req: Request, res: Response): Promise<void> {
     try {
       const { id } = req.params;
       const mes = Number(req.query.mes) || new Date().getMonth() + 1;
       const ano = Number(req.query.ano) || new Date().getFullYear();
-
-      //console.log(`=> ROTA ACESSADA LOCALMENTE | Buscando ID: ${id} | Mês: ${mes} | Ano: ${ano}`);
 
       const usuario = await prisma.usuario.findUnique({
         where: { id },
@@ -112,33 +110,39 @@ export const RelatorioController = {
         return;
       }
 
-      //console.log(`=> BUSCA BANCO | Achou Usuário? ${!!usuario} | Tem Jornada? ${!!usuario?.horarioBase} | Tipo Escala: ${usuario?.horarioBase?.tipoEscala} | Data Início Escala: ${usuario?.dataInicioEscala}`);
-
       const inicioMes = new Date(ano, mes - 1, 1);
       const fimMes = new Date(ano, mes, 0, 23, 59, 59);
-      const totalDiasNoMes2 = fimMes.getDate();
-
-      //console.log(`=> CALCULO DO LAÇO | Total de dias calculados para o mês: ${totalDiasNoMes2}`);
+      const totalDiasNoMes = fimMes.getDate();
 
       const batidas = await prisma.batidaPonto.findMany({
         where: {
           usuarioId: id,
           dataHora: { gte: inicioMes, lte: fimMes }
         },
+        include: {
+          modificacoes: {
+            orderBy: { createdAt: 'desc' }
+          }
+        },
         orderBy: { dataHora: 'asc' }
       });
 
       const batidasAgrupadasPorDia: { [key: string]: any[] } = {};
       batidas.forEach(b => {
-        // 🔥 CORREÇÃO 1: Agrupamento local estável baseado em componentes da data
-        const anoB = b.dataHora.getFullYear();
-        const mesB = String(b.dataHora.getMonth() + 1).padStart(2, '0');
-        const diaB = String(b.dataHora.getDate()).padStart(2, '0');
+        const possuiModificacao = b.modificacoes && b.modificacoes.length > 0;
+        const dataParaCalculo = possuiModificacao ? b.modificacoes[0].dataHoraNova : b.dataHora;
+
+        const anoB = dataParaCalculo.getFullYear();
+        const mesB = String(dataParaCalculo.getMonth() + 1).padStart(2, '0');
+        const diaB = String(dataParaCalculo.getDate()).padStart(2, '0');
         const dataStr = `${anoB}-${mesB}-${diaB}`;
         
         if (!batidasAgrupadasPorDia[dataStr]) {
           batidasAgrupadasPorDia[dataStr] = [];
         }
+        
+        // 🔥 Correção do Item 2: Armazena a data real recalculada (original ou ajustada)
+        (b as any).dataCalculoReal = dataParaCalculo;
         batidasAgrupadasPorDia[dataStr].push(b);
       });
 
@@ -146,11 +150,9 @@ export const RelatorioController = {
       let totalFaltas = 0;
       const historicoDias = [];
 
-      const totalDiasNoMes = fimMes.getDate();
       for (let dia = 1; dia <= totalDiasNoMes; dia++) {
         const dataCorrente = new Date(ano, mes - 1, dia);
         
-        // 🔥 CORREÇÃO 2: Geração da chave do loop idêntica ao agrupamento (Sem usar ISOString)
         const anoCStr = dataCorrente.getFullYear();
         const mesCStr = String(dataCorrente.getMonth() + 1).padStart(2, '0');
         const diaCStr = String(dataCorrente.getDate()).padStart(2, '0');
@@ -160,7 +162,6 @@ export const RelatorioController = {
         const numeroSemana = obterNumeroSemanaAno(dataCorrente);
         const ehSemanaImpar = numeroSemana % 2 !== 0;
 
-        // Valores Padrão
         let trabalhaNesseDia = diaDaSemana !== 0 && diaDaSemana !== 6;
         let entradaEsperada = "08:00";
         let saidaEsperada = "17:00";
@@ -169,7 +170,15 @@ export const RelatorioController = {
         if (usuario.horarioBase) {
           entradaEsperada = usuario.horarioBase.horaEntradaPadrao;
           saidaEsperada = usuario.horarioBase.horaSaidaPadrao;
-          minutosEsperadosNoDia = transformarEmMinutos(saidaEsperada) - transformarEmMinutos(entradaEsperada);
+          
+          let diferencaBrutaEsperada = transformarEmMinutos(saidaEsperada) - transformarEmMinutos(entradaEsperada);
+          
+          if (usuario.horarioBase.utilizaAlmocoAutomatico) {
+            const minutosAlmoco = usuario.horarioBase.duracaoAlmocoMinutos || 60;
+            minutosEsperadosNoDia = diferencaBrutaEsperada - minutosAlmoco;
+          } else {
+            minutosEsperadosNoDia = diferencaBrutaEsperada;
+          }
 
           if (usuario.horarioBase.tipoEscala === 'ALTERNADA') {
             const dataAncora = usuario.dataInicioEscala 
@@ -190,20 +199,16 @@ export const RelatorioController = {
             const diferencaTempo = dataAtualUTC - dataAncoraUTC;
             const diferencaDias = Math.round(diferencaTempo / (1000 * 60 * 60 * 24));
 
-            // 🎯 CORREÇÃO 3: Posicionamento lógico do cálculo antes da validação
             if (diferencaDias >= 0) {
               trabalhaNesseDia = diferencaDias % 2 === 0;
             } else {
               trabalhaNesseDia = false;
             }
 
-            //console.log(`Dia: ${dataCorrenteStr} | Distância da Âncora: ${diferencaDias} dias | Trabalha nesse dia? ${trabalhaNesseDia}`);
-
             if (!trabalhaNesseDia) {
               minutosEsperadosNoDia = 0;
             }
           } 
-          // 📜 MANTÉM ESCALA SEMANAL PADRÃO
           else {
             if (diaDaSemana === 6) {
               trabalhaNesseDia = usuario.horarioBase.trabalhaSabado;
@@ -249,11 +254,25 @@ export const RelatorioController = {
         let saldoDoDiaMinutos = 0;
         let status = 'Regular';
 
+        // === 🛠️ 1. GANCHOS DO ITEM 3: ABAIXO COLOCAREMOS A VALIDAÇÃO DE FÉRIAS/AFASTAMENTOS ===
+        let possuiAfastamento = false;
+        let tipoAfastamentoTexto = ""; 
+        // ====================================================================================
+
+        // === CÁLCULO DE TEMPO TRABALHADO BASEADO NA TRILHA DE AUDITORIA ===
         if (batidasDoDia.length >= 2) {
           for (let i = 0; i < batidasDoDia.length; i += 2) {
             if (batidasDoDia[i + 1]) {
-              const diffMs = batidasDoDia[i + 1].dataHora.getTime() - batidasDoDia[i].dataHora.getTime();
+              // 🔥 Correção Item 2: Usa 'dataCalculoReal' em vez de 'dataHora' para calcular o tempo ajustado
+              const diffMs = batidasDoDia[i + 1].dataCalculoReal.getTime() - batidasDoDia[i].dataCalculoReal.getTime();
               minutesTrabalhadosNoDia += Math.floor(diffMs / 1000 / 60);
+            }
+          }
+          
+          if (batidasDoDia.length === 2 && usuario.horarioBase?.utilizaAlmocoAutomatico) {
+            const minutosAlmoco = usuario.horarioBase.duracaoAlmocoMinutos || 60;
+            if (minutesTrabalhadosNoDia > minutosAlmoco) {
+              minutesTrabalhadosNoDia -= minutosAlmoco;
             }
           }
           
@@ -270,7 +289,11 @@ export const RelatorioController = {
           status = 'Batida Incompleta';
           saldoDoDiaMinutos = trabalhaNesseDia ? -minutosEsperadosNoDia : 0;
         } else {
-          if (trabalhaNesseDia) {
+          // 🔥 Modificação para interceptar Férias e Afastamentos no cálculo
+          if (possuiAfastamento) {
+            status = tipoAfastamentoTexto; // Ex: 'Férias', 'Atestado Médico'
+            saldoDoDiaMinutos = 0; // Afastamento legal não debita banco de horas
+          } else if (trabalhaNesseDia) {
             status = 'Falta';
             totalFaltas++;
             saldoDoDiaMinutos = -minutosEsperadosNoDia;
@@ -282,15 +305,28 @@ export const RelatorioController = {
 
         saldoBancoHorasMinutos += saldoDoDiaMinutos;
 
-        const batidasFormatadasComCoordenadas = batidasDoDia.map(b => ({
-          hora: b.dataHora.toLocaleTimeString('pt-BR', { 
-            hour: '2-digit', 
-            minute: '2-digit', 
-            timeZone: 'America/Sao_Paulo' 
-          }),
-          latitude: b.latitude || null,
-          longitude: b.longitude || null
-        }));
+        // 🔥 Correção Item 2: Envia os metadados de auditoria e horários originais para a tabela Vue
+        const batidasFormatadasComCoordenadas = batidasDoDia.map(b => {
+          const foiModificado = b.modificacoes && b.modificacoes.length > 0;
+          return {
+            id: b.id,
+            // Exibe a hora efetiva (corrigida se houver alteração)
+            hora: b.dataCalculoReal.toLocaleTimeString('pt-BR', { 
+              hour: '2-digit', 
+              minute: '2-digit', 
+              timeZone: 'America/Sao_Paulo' 
+            }),
+            foiAlterada: foiModificado,
+            justificativa: foiModificado ? b.modificacoes[0].justificativa : null,
+            horaOriginal: b.dataHora.toLocaleTimeString('pt-BR', {
+              hour: '2-digit',
+              minute: '2-digit',
+              timeZone: 'America/Sao_Paulo'
+            }),
+            latitude: b.latitude || null,
+            longitude: b.longitude || null
+          };
+        });
 
         historicoDias.push({
           data: dataCorrenteStr,
@@ -313,7 +349,7 @@ export const RelatorioController = {
       });
 
     } catch (error) {
-      console.error('Erro ao gerar relatório dinâmico:', error);
+      console.error('Erro crítico capturado na geração do relatório:', error);
       res.status(500).json({ erro: 'Erro interno ao processar relatório.' });
     }
   }
