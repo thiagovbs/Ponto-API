@@ -26,7 +26,7 @@ const obterNumeroSemanaAno = (data: Date): number => {
 
 export const RelatorioController = {
   // 1. DASHBOARD GERAL (Indicadores em Tempo Real para o Admin)
-  async obterDashboard(req: Request, res: Response): Promise<void> {
+  async dashboardGeral(req: Request, res: Response): Promise<void> {
     try {
       const hoje = new Date();
       const dataInicio = new Date(hoje.getFullYear(), hoje.getMonth(), hoje.getDate(), 0, 0, 0);
@@ -80,7 +80,7 @@ export const RelatorioController = {
   },
 
   // 2. EMISSÃO DO ESPELHO DE PONTO MENSAL (Com Banco de Horas e Tolerância de Almoço)
-  async obterEspelhoMensal(req: Request, res: Response): Promise<void> {
+  async relatorioMensalPorFuncionario(req: Request, res: Response): Promise<void> {
     try {
       const { usuarioId } = req.params;
       const { mes, ano } = req.query;
