@@ -3,8 +3,9 @@ import { prisma } from '../config/prisma';
 
 // Funções auxiliares para cálculo de horas
 const transformarEmMinutos = (horarioStr: string): number => {
+  if (!horarioStr) return 0;
   const [horas, minutos] = horarioStr.split(':').map(Number);
-  return horas * 60 + minutos;
+  return horas * 60 + minutes;
 };
 
 const formatarMinutosParaHoras = (minutosTotais: number): string => {
@@ -25,7 +26,7 @@ const obterNumeroSemanaAno = (data: Date): number => {
 };
 
 export const RelatorioController = {
-  // 1. DASHBOARD GERAL (Indicadores em Tempo Real para o Admin)
+  // 1. DASHBOARD GERAL (NOME CORRIGIDO: dashboardGeral)
   async dashboardGeral(req: Request, res: Response): Promise<void> {
     try {
       const hoje = new Date();
@@ -66,7 +67,7 @@ export const RelatorioController = {
         feedAtividades: feedAtividades.map(f => ({
           id: f.id,
           nome: f.usuario.nome,
-          // 🔒 TIMEZONE CORRIGIDO: Força leitura UTC literal para blindar o feed inicial
+          // 🔒 Trava UTC literal para blindar a leitura contra cortes de fuso no servidor
           hora: f.dataHora.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' }),
           foto: f.fotoBase64,
           latitude: f.latitude,
@@ -79,7 +80,7 @@ export const RelatorioController = {
     }
   },
 
-  // 2. EMISSÃO DO ESPELHO DE PONTO MENSAL (Com Banco de Horas e Tolerância de Almoço)
+  // 2. EMISSÃO DO ESPELHO DE PONTO (NOME CORRIGIDO: relatorioMensalPorFuncionario)
   async relatorioMensalPorFuncionario(req: Request, res: Response): Promise<void> {
     try {
       const { usuarioId } = req.params;
@@ -117,7 +118,7 @@ export const RelatorioController = {
         orderBy: { dataHora: 'asc' },
         include: {
           modificacoes: {
-            orderBy: { criadoEm: 'desc' },
+            orderBy: { createdAt: 'desc' }, // 🔒 Alinhado com a propriedade real gerada pelo Prisma Client
             take: 1
           }
         }
@@ -141,8 +142,11 @@ export const RelatorioController = {
                  dataB.getDate() === dia;
         });
 
+        // Injeta a propriedade de cálculo em tempo de execução de forma segura
         batidasDoDia.forEach(b => {
-          (b as any).dataCalculoReal = b.modificacoes.length > 0 ? b.modificacoes[0].dataHoraNova : b.dataHora;
+          (b as any).dataCalculoReal = b.modificacoes && b.modificacoes.length > 0 
+            ? b.modificacoes[0].dataHoraNova 
+            : b.dataHora;
         });
 
         batidasDoDia.sort((a, b) => (a as any).dataCalculoReal.getTime() - (b as any).dataCalculoReal.getTime());
@@ -154,23 +158,28 @@ export const RelatorioController = {
         if (usuario.horarioBase) {
           const h = usuario.horarioBase;
           if (h.tipoEscala === 'SEMANAL') {
-            if (diaSemanaNum === 1 && h.trabalhaSegunda) { trabalhaNoDia = true; entradaEsperadaStr = h.horaEntradaSegunda!; saidaEsperadaStr = h.horaSaidaSegunda!; }
-            else if (diaSemanaNum === 2 && h.trabalhaTerca) { trabalhaNoDia = true; entradaEsperadaStr = h.horaEntradaTerca!; saidaEsperadaStr = h.horaSaidaTerca!; }
-            else if (diaSemanaNum === 3 && h.trabalhaQuarta) { trabalhaNoDia = true; entradaEsperadaStr = h.horaEntradaQuarta!; saidaEsperadaStr = h.horaSaidaQuarta!; }
-            else if (diaSemanaNum === 4 && h.trabalhaQuinta) { trabalhaNoDia = true; entradaEsperadaStr = h.horaEntradaQuinta!; saidaEsperadaStr = h.horaSaidaQuinta!; }
-            else if (diaSemanaNum === 5 && h.trabalhaSexta) { trabalhaNoDia = true; entradaEsperadaStr = h.horaEntradaSexta!; saidaEsperadaStr = h.horaSaidaSexta!; }
-            else if (diaSemanaNum === 6 && h.trabalhaSabado) { trabalhaNoDia = true; entradaEsperadaStr = h.horaEntradaSabado!; saidaEsperadaStr = h.horaSaidaSabado!; }
-            else if (diaSemanaNum === 0) {
-              if (h.trabalhaDomingoAlt) {
-                const numSemana = obterNumeroSemanaAno(dataCorrente);
-                const ehSemanaTrabalho = h.domingoInicioImpar ? (numSemana % 2 !== 0) : (numSemana % 2 === 0);
-                if (ehSemanaTrabalho) { trabalhaNoDia = true; entradaEsperadaStr = h.horaEntradaDomingo!; saidaEsperadaStr = h.horaSaidaDomingo!; }
-              } else if (h.trabalhaDomingo) {
-                trabalhaNoDia = true; entradaEsperadaStr = h.horaEntradaDomingo!; saidaEsperadaStr = h.horaSaidaDomingo!;
+            // Mapeamento com base nas propriedades fixas reais do schema
+            if (diaSemanaNum >= 1 && diaSemanaNum <= 5) {
+              trabalhaNoDia = true; 
+              entradaEsperadaStr = h.horaEntradaPadrao; 
+              saidaEsperadaStr = h.horaSaidaPadrao; 
+            } else if (diaSemanaNum === 6 && (h as any).trabalhaSabado) {
+              trabalhaNoDia = true; 
+              entradaEsperadaStr = (h as any).horaEntradaSabado || h.horaEntradaPadrao; 
+              saidaEsperadaStr = (h as any).horaSaidaSabado || h.horaSaidaPadrao; 
+            } else if (diaSemanaNum === 0) {
+              if (h.domingoInicioImpar || (h as any).trabalhaDomingo) {
+                trabalhaNoDia = true; 
+                entradaEsperadaStr = (h as any).horaEntradaDomingo || h.horaEntradaPadrao; 
+                saidaEsperadaStr = (h as any).horaSaidaDomingo || h.horaSaidaPadrao;
               }
             }
           } else if (h.tipoEscala === 'ALTERNADA') {
-            const dataReferenciaUsuario = usuario.data_inicio_escala ? new Date(usuario.data_inicio_escala) : null;
+            // 🔒 Propriedade corrigida para o camelCase real do Prisma Client
+            const dataReferenciaUsuario = (usuario as any).dataInicioEscala 
+              ? new Date((usuario as any).dataInicioEscala) 
+              : null;
+              
             if (dataReferenciaUsuario) {
               const checkZero = new Date(dataCorrente.getFullYear(), dataCorrente.getMonth(), dataCorrente.getDate());
               const refZero = new Date(dataReferenciaUsuario.getFullYear(), dataReferenciaUsuario.getMonth(), dataReferenciaUsuario.getDate());
@@ -178,8 +187,8 @@ export const RelatorioController = {
               const diferencaDias = Math.floor(diferencaTempo / (1000 * 60 * 60 * 24));
               if (diferencaDias >= 0 && diferencaDias % 2 === 0) {
                 trabalhaNoDia = true;
-                entradaEsperadaStr = h.entradaAlternada || '07:00';
-                saidaEsperadaStr = h.saidaAlternada || '19:00';
+                entradaEsperadaStr = h.horaEntradaPadrao;
+                saidaEsperadaStr = h.horaSaidaPadrao;
               }
             }
           }
@@ -192,39 +201,46 @@ export const RelatorioController = {
         if (trabalhaNoDia) {
           status = 'FALTA';
           if (batidasDoDia.length > 0) {
-            status = 'TRABALHADO';
-            
-            for (let i = 0; i < batidasDoDia.length; i += 2) {
-              if (i + 1 < batidasDoDia.length) {
-                const entradaMinutos = transformarEmMinutos((batidasDoDia[i] as any).dataCalculoReal.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' }));
-                const saidaMinutos = transformarEmMinutos((batidasDoDia[i+1] as any).dataCalculoReal.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' }));
-                minutesTrabalhadosNoDia += (saidaMinutos - entradaMinutos);
-              }
-            }
-
-            const minutosContratuaisEsperados = transformarEmMinutos(saidaEsperadaStr) - transformarEmMinutos(entradaEsperadaStr);
-            let cargaHorariaComAlmocoDefinida = minutosContratuaisEsperados;
-
-            if (usuario.horarioBase?.utilizaAlmocoAutomatico) {
-              const duracaoAlmocoConfigurada = usuario.horarioBase.duracaoAlmocoMinutos || 60;
-              if (batidasDoDia.length === 2) {
-                minutesTrabalhadosNoDia -= duracaoAlmocoConfigurada;
-                if (minutesTrabalhadosNoDia < 0) minutesTrabalhadosNoDia = 0;
-              } else if (batidasDoDia.length >= 4) {
-                const primeiroAlmocoEntrada = transformarEmMinutos((batidasDoDia[1] as any).dataCalculoReal.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' }));
-                const primeiroAlmocoSaida = transformarEmMinutos((batidasDoDia[2] as any).dataCalculoReal.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' }));
-                const almocoRealMinutos = primeiroAlmocoSaida - primeiroAlmocoEntrada;
-                const diferencaDeAlmocoTolerada = duracaoAlmocoConfigurada - almocoRealMinutos;
-                if (diferencaDeAlmocoTolerada > 0) {
-                  minutesTrabalhadosNoDia -= diferencaDeAlmocoTolerada;
+            // Tratamento de segurança: Se o ponto foi marcado com a flag de Ano 1970 (Time 0), indica exclusão lógica
+            const bPrimeira = batidasDoDia[0];
+            if (bPrimeira.modificacoes && bPrimeira.modificacoes.length > 0 && bPrimeira.modificacoes[0].dataHoraNova.getTime() === 0) {
+              status = 'FALTA';
+            } else {
+              status = 'TRABALHADO';
+              for (let i = 0; i < batidasDoDia.length; i += 2) {
+                if (i + 1 < batidasDoDia.length) {
+                  const entradaMinutos = transformarEmMinutos((batidasDoDia[i] as any).dataCalculoReal.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' }));
+                  const saidaMinutos = transformarEmMinutos((batidasDoDia[i+1] as any).dataCalculoReal.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' }));
+                  minutesTrabalhadosNoDia += (saidaMinutos - entradaMinutos);
                 }
               }
-            } else {
-              cargaHorariaComAlmocoDefinida = minutosContratuaisEsperados - 60;
-            }
 
-            saldoDoDiaMinutos = minutesTrabalhadosNoDia - cargaHorariaComAlmocoDefinida;
-          } else {
+              const minutosContratuaisEsperados = transformarEmMinutos(saidaEsperadaStr) - transformarEmMinutos(entradaEsperadaStr);
+              let cargaHorariaComAlmocoDefinida = minutosContratuaisEsperados;
+
+              if (usuario.horarioBase?.utilizaAlmocoAutomatico) {
+                const duracaoAlmocoConfigurada = usuario.horarioBase.duracaoAlmocoMinutos || 60;
+                if (batidasDoDia.length === 2) {
+                  minutesTrabalhadosNoDia -= duracaoAlmocoConfigurada;
+                  if (minutesTrabalhadosNoDia < 0) minutesTrabalhadosNoDia = 0;
+                } else if (batidasDoDia.length >= 4) {
+                  const primeiroAlmocoEntrada = transformarEmMinutos((batidasDoDia[1] as any).dataCalculoReal.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' }));
+                  const primeiroAlmocoSaida = transformarEmMinutos((batidasDoDia[2] as any).dataCalculoReal.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' }));
+                  const almocoRealMinutos = primeiroAlmocoSaida - primeiroAlmocoEntrada;
+                  const diferencaDeAlmocoTolerada = duracaoAlmocoConfigurada - almocoRealMinutos;
+                  if (diferencaDeAlmocoTolerada > 0) {
+                    minutesTrabalhadosNoDia -= diferencaDeAlmocoTolerada;
+                  }
+                }
+              } else {
+                cargaHorariaComAlmocoDefinida = minutosContratuaisEsperados - 60;
+              }
+
+              saldoDoDiaMinutos = minutesTrabalhadosNoDia - cargaHorariaComAlmocoDefinida;
+            }
+          }
+
+          if (status === 'FALTA') {
             const hojeVerificador = new Date();
             const ehDataFutura = new Date(anoInt, mesInt - 1, dia) > hojeVerificador;
             if (ehDataFutura) {
@@ -253,11 +269,16 @@ export const RelatorioController = {
 
         saldoBancoHorasMinutos += saldoDoDiaMinutos;
 
-        const batidasFormatadasComCoordenadas = batidasDoDia.map(b => {
+        // Filtra para remover da exibição na tabela as batidas que foram desconsideradas logicamente
+        const batidasFiltradasParaExibicao = batidasDoDia.filter(b => {
+          return !(b.modificacoes && b.modificacoes.length > 0 && b.modificacoes[0].dataHoraNova.getTime() === 0);
+        });
+
+        const batidasFormatadasComCoordenadas = batidasFiltradasParaExibicao.map(b => {
           const foiModificado = b.modificacoes && b.modificacoes.length > 0;
           return {
             id: b.id,
-            // 🔒 TIMEZONE CORRIGIDO: Garante a extração da hora literal gravada sem reduções
+            // 🔒 Força timeZone UTC para casar com a leitura fidedigna das batidas no banco
             hora: (b as any).dataCalculoReal.toLocaleTimeString('pt-BR', { 
               hour: '2-digit', 
               minute: '2-digit', 
