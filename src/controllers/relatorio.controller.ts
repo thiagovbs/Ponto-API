@@ -5,7 +5,7 @@ import { prisma } from '../config/prisma';
 const transformarEmMinutos = (horarioStr: string): number => {
   if (!horarioStr) return 0;
   const [horas, minutos] = horarioStr.split(':').map(Number);
-  return horas * 60 + minutes;
+  return horas * 60 + minutos;
 };
 
 const formatarMinutosParaHoras = (minutosTotais: number): string => {
