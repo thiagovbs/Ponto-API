@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { prisma } from '../config/prisma';
+import HTMLPDF from 'html-pdf-node';
 
 // Funções auxiliares para cálculo de horas
 const transformarEmMinutos = (horarioStr: string): number => {
@@ -26,7 +27,7 @@ const obterNumeroSemanaAno = (data: Date): number => {
 };
 
 export const RelatorioController = {
-  // 1. DASHBOARD GERAL (NOME CORRIGIDO: dashboardGeral)
+  // 1. DASHBOARD GERAL
   async dashboardGeral(req: Request, res: Response): Promise<void> {
     try {
       const hoje = new Date();
@@ -67,7 +68,6 @@ export const RelatorioController = {
         feedAtividades: feedAtividades.map(f => ({
           id: f.id,
           nome: f.usuario.nome,
-          // 🔒 Trava UTC literal para blindar a leitura contra cortes de fuso no servidor
           hora: f.dataHora.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' }),
           foto: f.fotoBase64,
           latitude: f.latitude,
@@ -80,7 +80,7 @@ export const RelatorioController = {
     }
   },
 
-  // 2. EMISSÃO DO ESPELHO DE PONTO (NOME CORRIGIDO: relatorioMensalPorFuncionario)
+  // 2. EMISSÃO DO ESPELHO DE PONTO EM JSON
   async relatorioMensalPorFuncionario(req: Request, res: Response): Promise<void> {
     try {
       const { usuarioId } = req.params;
@@ -118,7 +118,7 @@ export const RelatorioController = {
         orderBy: { dataHora: 'asc' },
         include: {
           modificacoes: {
-            orderBy: { createdAt: 'desc' }, // 🔒 Alinhado com a propriedade real gerada pelo Prisma Client
+            orderBy: { createdAt: 'desc' },
             take: 1
           }
         }
@@ -142,7 +142,6 @@ export const RelatorioController = {
                  dataB.getDate() === dia;
         });
 
-        // Injeta a propriedade de cálculo em tempo de execução de forma segura
         batidasDoDia.forEach(b => {
           (b as any).dataCalculoReal = b.modificacoes && b.modificacoes.length > 0 
             ? b.modificacoes[0].dataHoraNova 
@@ -158,7 +157,6 @@ export const RelatorioController = {
         if (usuario.horarioBase) {
           const h = usuario.horarioBase;
           if (h.tipoEscala === 'SEMANAL') {
-            // Mapeamento com base nas propriedades fixas reais do schema
             if (diaSemanaNum >= 1 && diaSemanaNum <= 5) {
               trabalhaNoDia = true; 
               entradaEsperadaStr = h.horaEntradaPadrao; 
@@ -175,7 +173,6 @@ export const RelatorioController = {
               }
             }
           } else if (h.tipoEscala === 'ALTERNADA') {
-            // 🔒 Propriedade corrigida para o camelCase real do Prisma Client
             const dataReferenciaUsuario = (usuario as any).dataInicioEscala 
               ? new Date((usuario as any).dataInicioEscala) 
               : null;
@@ -194,14 +191,13 @@ export const RelatorioController = {
           }
         }
 
-        let minutesTrabalhadosNoDia = 0;
+        let minutosTrabalhadosNoDia = 0;
         let saldoDoDiaMinutos = 0;
         let status = 'FOLGA';
 
         if (trabalhaNoDia) {
           status = 'FALTA';
           if (batidasDoDia.length > 0) {
-            // Tratamento de segurança: Se o ponto foi marcado com a flag de Ano 1970 (Time 0), indica exclusão lógica
             const bPrimeira = batidasDoDia[0];
             if (bPrimeira.modificacoes && bPrimeira.modificacoes.length > 0 && bPrimeira.modificacoes[0].dataHoraNova.getTime() === 0) {
               status = 'FALTA';
@@ -211,7 +207,7 @@ export const RelatorioController = {
                 if (i + 1 < batidasDoDia.length) {
                   const entradaMinutos = transformarEmMinutos((batidasDoDia[i] as any).dataCalculoReal.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' }));
                   const saidaMinutos = transformarEmMinutos((batidasDoDia[i+1] as any).dataCalculoReal.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' }));
-                  minutesTrabalhadosNoDia += (saidaMinutos - entradaMinutos);
+                  minutosTrabalhadosNoDia += (saidaMinutos - entradaMinutos);
                 }
               }
 
@@ -221,22 +217,22 @@ export const RelatorioController = {
               if (usuario.horarioBase?.utilizaAlmocoAutomatico) {
                 const duracaoAlmocoConfigurada = usuario.horarioBase.duracaoAlmocoMinutos || 60;
                 if (batidasDoDia.length === 2) {
-                  minutesTrabalhadosNoDia -= duracaoAlmocoConfigurada;
-                  if (minutesTrabalhadosNoDia < 0) minutesTrabalhadosNoDia = 0;
+                  minutosTrabalhadosNoDia -= duracaoAlmocoConfigurada;
+                  if (minutosTrabalhadosNoDia < 0) minutosTrabalhadosNoDia = 0;
                 } else if (batidasDoDia.length >= 4) {
                   const primeiroAlmocoEntrada = transformarEmMinutos((batidasDoDia[1] as any).dataCalculoReal.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' }));
                   const primeiroAlmocoSaida = transformarEmMinutos((batidasDoDia[2] as any).dataCalculoReal.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' }));
                   const almocoRealMinutos = primeiroAlmocoSaida - primeiroAlmocoEntrada;
                   const diferencaDeAlmocoTolerada = duracaoAlmocoConfigurada - almocoRealMinutos;
                   if (diferencaDeAlmocoTolerada > 0) {
-                    minutesTrabalhadosNoDia -= diferencaDeAlmocoTolerada;
+                    minutosTrabalhadosNoDia -= diferencaDeAlmocoTolerada;
                   }
                 }
               } else {
                 cargaHorariaComAlmocoDefinida = minutosContratuaisEsperados - 60;
               }
 
-              saldoDoDiaMinutos = minutesTrabalhadosNoDia - cargaHorariaComAlmocoDefinida;
+              saldoDoDiaMinutos = minutosTrabalhadosNoDia - cargaHorariaComAlmocoDefinida;
             }
           }
 
@@ -260,16 +256,15 @@ export const RelatorioController = {
               if (i + 1 < batidasDoDia.length) {
                 const entradaMinutos = transformarEmMinutos((batidasDoDia[i] as any).dataCalculoReal.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' }));
                 const saidaMinutos = transformarEmMinutos((batidasDoDia[i+1] as any).dataCalculoReal.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' }));
-                minutesTrabalhadosNoDia += (saidaMinutos - entradaMinutos);
+                minutosTrabalhadosNoDia += (saidaMinutos - entradaMinutos);
               }
             }
-            saldoDoDiaMinutos = minutesTrabalhadosNoDia;
+            saldoDoDiaMinutos = minutosTrabalhadosNoDia;
           }
         }
 
         saldoBancoHorasMinutos += saldoDoDiaMinutos;
 
-        // Filtra para remover da exibição na tabela as batidas que foram desconsideradas logicamente
         const batidasFiltradasParaExibicao = batidasDoDia.filter(b => {
           return !(b.modificacoes && b.modificacoes.length > 0 && b.modificacoes[0].dataHoraNova.getTime() === 0);
         });
@@ -278,7 +273,6 @@ export const RelatorioController = {
           const foiModificado = b.modificacoes && b.modificacoes.length > 0;
           return {
             id: b.id,
-            // 🔒 Força timeZone UTC para casar com a leitura fidedigna das batidas no banco
             hora: (b as any).dataCalculoReal.toLocaleTimeString('pt-BR', { 
               hour: '2-digit', 
               minute: '2-digit', 
@@ -300,7 +294,7 @@ export const RelatorioController = {
           data: dataCorrenteStr,
           status,
           batidas: batidasFormatadasComCoordenadas,
-          horasTrabalhadas: formatarMinutosParaHoras(minutesTrabalhadosNoDia),
+          horasTrabalhadas: formatarMinutosParaHoras(minutosTrabalhadosNoDia),
           saldoDoDia: formatarMinutosParaHoras(saldoDoDiaMinutos)
         });
       }
@@ -318,6 +312,345 @@ export const RelatorioController = {
     } catch (error) {
       console.error(error);
       res.status(500).json({ erro: 'Falha interna ao compilar dados do relatório de ponto.' });
+    }
+  },
+  
+  // 3. GERAÇÃO DO PDF OFICIAL EM PÁGINA ÚNICA
+  async emitirPDFEspelho(req: Request, res: Response): Promise<void> {
+    try {
+      const { usuarioId } = req.params;
+      const { mes, ano } = req.query;
+
+      if (!usuarioId || !mes || !ano) {
+        res.status(400).json({ erro: 'Parâmetros insuficientes para geração do documento.' });
+        return;
+      }
+
+      const usuario = await prisma.usuario.findUnique({
+        where: { id: usuarioId },
+        include: { horarioBase: true }
+      });
+
+      if (!usuario) {
+        res.status(404).json({ erro: 'Colaborador não identificado.' });
+        return;
+      }
+
+      const mesInt = parseInt(mes as string, 10);
+      const anoInt = parseInt(ano as string, 10);
+
+      const dataInicio = new Date(anoInt, mesInt - 1, 1);
+      const dataFim = new Date(anoInt, mesInt, 0, 23, 59, 59);
+
+      const todasBatidas = await prisma.batidaPonto.findMany({
+        where: {
+          usuarioId,
+          dataHora: {
+            gte: dataInicio,
+            lte: dataFim
+          }
+        },
+        orderBy: { dataHora: 'asc' },
+        include: {
+          modificacoes: {
+            orderBy: { createdAt: 'desc' },
+            take: 1
+          }
+        }
+      });
+
+      const totalDiasNoMes = new Date(anoInt, mesInt, 0).getDate();
+      const historicoDias = [];
+      let totalFaltas = 0;
+      let saldoBancoHorasMinutos = 0;
+
+      for (let dia = 1; dia <= totalDiasNoMes; dia++) {
+        const dataCorrente = new Date(anoInt, mesInt - 1, dia);
+        const dataCorrenteStr = `${String(dia).padStart(2, '0')}/${String(mesInt).padStart(2, '0')}/${anoInt}`;
+        
+        const diaSemanaNum = dataCorrente.getDay();
+
+        const batidasDoDia = todasBatidas.filter(b => {
+          const dataB = b.dataHora;
+          return dataB.getFullYear() === anoInt &&
+                 (dataB.getMonth() + 1) === mesInt &&
+                 dataB.getDate() === dia;
+        });
+
+        batidasDoDia.forEach(b => {
+          (b as any).dataCalculoReal = b.modificacoes && b.modificacoes.length > 0 
+            ? b.modificacoes[0].dataHoraNova 
+            : b.dataHora;
+        });
+
+        batidasDoDia.sort((a, b) => (a as any).dataCalculoReal.getTime() - (b as any).dataCalculoReal.getTime());
+
+        let trabalhaNoDia = false;
+        let entradaEsperadaStr = '';
+        let saidaEsperadaStr = '';
+
+        if (usuario.horarioBase) {
+          const h = usuario.horarioBase;
+          if (h.tipoEscala === 'SEMANAL') {
+            if (diaSemanaNum >= 1 && diaSemanaNum <= 5) {
+              trabalhaNoDia = true; 
+              entradaEsperadaStr = h.horaEntradaPadrao; 
+              saidaEsperadaStr = h.horaSaidaPadrao; 
+            } else if (diaSemanaNum === 6 && (h as any).trabalhaSabado) {
+              trabalhaNoDia = true; 
+              entradaEsperadaStr = (h as any).horaEntradaSabado || h.horaEntradaPadrao; 
+              saidaEsperadaStr = (h as any).horaSaidaSabado || h.horaSaidaPadrao; 
+            } else if (diaSemanaNum === 0) {
+              if (h.domingoInicioImpar || (h as any).trabalhaDomingo) {
+                trabalhaNoDia = true; 
+                entradaEsperadaStr = (h as any).horaEntradaDomingo || h.horaEntradaPadrao; 
+                saidaEsperadaStr = (h as any).horaSaidaDomingo || h.horaSaidaPadrao;
+              }
+            }
+          } else if (h.tipoEscala === 'ALTERNADA') {
+            const dataReferenciaUsuario = (usuario as any).dataInicioEscala 
+              ? new Date((usuario as any).dataInicioEscala) 
+              : null;
+              
+            if (dataReferenciaUsuario) {
+              const checkZero = new Date(dataCorrente.getFullYear(), dataCorrente.getMonth(), dataCorrente.getDate());
+              const refZero = new Date(dataReferenciaUsuario.getFullYear(), dataReferenciaUsuario.getMonth(), dataReferenciaUsuario.getDate());
+              const diferencaTempo = checkZero.getTime() - refZero.getTime();
+              const diferencaDias = Math.floor(diferencaTempo / (1000 * 60 * 60 * 24));
+              if (diferencaDias >= 0 && diferencaDias % 2 === 0) {
+                trabalhaNoDia = true;
+                entradaEsperadaStr = h.horaEntradaPadrao;
+                saidaEsperadaStr = h.horaSaidaPadrao;
+              }
+            }
+          }
+        }
+
+        let minutosTrabalhadosNoDia = 0;
+        let saldoDoDiaMinutos = 0;
+        let status = 'FOLGA';
+
+        if (trabalhaNoDia) {
+          status = 'FALTA';
+          if (batidasDoDia.length > 0) {
+            const bPrimeira = batidasDoDia[0];
+            if (bPrimeira.modificacoes && bPrimeira.modificacoes.length > 0 && bPrimeira.modificacoes[0].dataHoraNova.getTime() === 0) {
+              status = 'FALTA';
+            } else {
+              status = 'TRABALHADO';
+              for (let i = 0; i < batidasDoDia.length; i += 2) {
+                if (i + 1 < batidasDoDia.length) {
+                  const entradaMinutos = transformarEmMinutos((batidasDoDia[i] as any).dataCalculoReal.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' }));
+                  const saidaMinutos = transformarEmMinutos((batidasDoDia[i+1] as any).dataCalculoReal.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' }));
+                  minutosTrabalhadosNoDia += (saidaMinutos - entradaMinutos);
+                }
+              }
+
+              const minutosContratuaisEsperados = transformarEmMinutos(saidaEsperadaStr) - transformarEmMinutos(entradaEsperadaStr);
+              let cargaHorariaComAlmocoDefinida = minutosContratuaisEsperados;
+
+              if (usuario.horarioBase?.utilizaAlmocoAutomatico) {
+                const duracaoAlmocoConfigurada = usuario.horarioBase.duracaoAlmocoMinutos || 60;
+                if (batidasDoDia.length === 2) {
+                  minutosTrabalhadosNoDia -= duracaoAlmocoConfigurada;
+                  if (minutosTrabalhadosNoDia < 0) minutosTrabalhadosNoDia = 0;
+                } else if (batidasDoDia.length >= 4) {
+                  const primeiroAlmocoEntrada = transformarEmMinutos((batidasDoDia[1] as any).dataCalculoReal.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' }));
+                  const primeiroAlmocoSaida = transformarEmMinutos((batidasDoDia[2] as any).dataCalculoReal.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' }));
+                  const almocoRealMinutos = primeiroAlmocoSaida - primeiroAlmocoEntrada;
+                  const diferencaDeAlmocoTolerada = duracaoAlmocoConfigurada - almocoRealMinutos;
+                  if (diferencaDeAlmocoTolerada > 0) {
+                    minutosTrabalhadosNoDia -= diferencaDeAlmocoTolerada;
+                  }
+                }
+              } else {
+                cargaHorariaComAlmocoDefinida = minutosContratuaisEsperados - 60;
+              }
+
+              saldoDoDiaMinutos = minutosTrabalhadosNoDia - cargaHorariaComAlmocoDefinida;
+            }
+          }
+
+          if (status === 'FALTA') {
+            const hojeVerificador = new Date();
+            const ehDataFutura = new Date(anoInt, mesInt - 1, dia) > hojeVerificador;
+            if (ehDataFutura) {
+              status = 'AGENDADO';
+              saldoDoDiaMinutos = 0;
+            } else {
+              totalFaltas++;
+              const minutosContratuaisEsperados = transformarEmMinutos(saidaEsperadaStr) - transformarEmMinutos(entradaEsperadaStr);
+              const cargaDeveriaTerSidoFeita = usuario.horarioBase?.utilizaAlmocoAutomatico ? minutosContratuaisEsperados : (minutosContratuaisEsperados - 60);
+              saldoDoDiaMinutos = -cargaDeveriaTerSidoFeita;
+            }
+          }
+        } else {
+          if (batidasDoDia.length > 0) {
+            status = 'EXTRA_FOLGA';
+            for (let i = 0; i < batidasDoDia.length; i += 2) {
+              if (i + 1 < batidasDoDia.length) {
+                const entradaMinutos = transformarEmMinutos((batidasDoDia[i] as any).dataCalculoReal.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' }));
+                const saidaMinutos = transformarEmMinutos((batidasDoDia[i+1] as any).dataCalculoReal.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' }));
+                minutosTrabalhadosNoDia += (saidaMinutos - entradaMinutos);
+              }
+            }
+            saldoDoDiaMinutos = minutosTrabalhadosNoDia;
+          }
+        }
+
+        saldoBancoHorasMinutos += saldoDoDiaMinutos;
+
+        const batidasFiltradasParaExibicao = batidasDoDia.filter(b => {
+          return !(b.modificacoes && b.modificacoes.length > 0 && b.modificacoes[0].dataHoraNova.getTime() === 0);
+        });
+
+        const batidasFormatadasComCoordenadas = batidasFiltradasParaExibicao.map(b => {
+          const foiModificado = b.modificacoes && b.modificacoes.length > 0;
+          return {
+            id: b.id,
+            hora: (b as any).dataCalculoReal.toLocaleTimeString('pt-BR', { 
+              hour: '2-digit', 
+              minute: '2-digit', 
+              timeZone: 'UTC' 
+            }),
+            foiAlterada: foiModificado,
+            justificativa: foiModificado ? b.modificacoes[0].justificativa : null,
+            horaOriginal: b.dataHora.toLocaleTimeString('pt-BR', {
+              hour: '2-digit',
+              minute: '2-digit',
+              timeZone: 'UTC'
+            }),
+            latitude: b.latitude || null,
+            longitude: b.longitude || null
+          };
+        });
+
+        historicoDias.push({
+          data: dataCorrenteStr,
+          status,
+          batidas: batidasFormatadasComCoordenadas,
+          horasTrabalhadas: formatarMinutosParaHoras(minutosTrabalhadosNoDia),
+          saldoDoDia: formatarMinutosParaHoras(saldoDoDiaMinutos)
+        });
+      }
+
+      // 1. Criação das linhas da tabela com padding ultra reduzido (3px) para economizar espaço vertical
+      let linhasHtml = '';
+      historicoDias.forEach(dia => {
+        const batidasTexto = dia.batidas.length > 0 
+          ? dia.batidas.map(b => b.hora).join('  |  ') 
+          : (dia.status === 'FOLGA' ? '<span style="color:#777; font-style:italic;">FOLGA</span>' : '<span style="color:#dc2626; font-weight:bold;">FALTA UNIFICADA</span>');
+
+        linhasHtml += `
+          <tr style="line-height: 1.1;">
+            <td style="border: 1px solid #444; padding: 3px; text-align: center;">${dia.data}</td>
+            <td style="border: 1px solid #444; padding: 3px; text-align: left; padding-left: 8px; letter-spacing: 0.3px;">${batidasTexto}</td>
+            <td style="border: 1px solid #444; padding: 3px; text-align: center;">${dia.horasTrabalhadas}</td>
+            <td style="border: 1px solid #444; padding: 3px; text-align: center;">${dia.saldoDoDia}</td>
+          </tr>
+        `;
+      });
+
+      // 2. HTML Calibrado com CSS de compressão cirúrgica para caber tudo em 1 Página A4
+      const htmlCompleto = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="UTF-8">
+          <style>
+            @page { 
+              size: A4; 
+              margin: 12mm 12mm 10mm 12mm; /* 📝 Margens ampliadas para melhor visualização física */
+            }
+            body { 
+              font-family: Arial, sans-serif; 
+              font-size: 8pt; 
+              color: #000; 
+              line-height: 1.15;
+              margin: 0;
+              padding: 0;
+            }
+            .header { border: 1px solid #000; padding: 6px 10px; margin-bottom: 6px; }
+            .title { text-align: center; font-size: 11pt; font-weight: bold; margin: 0 0 2px 0; text-transform: uppercase; letter-spacing: 0.5px; }
+            table { width: 100%; border-collapse: collapse; margin-bottom: 6px; }
+            th { border: 1px solid #444; background-color: #eaeaea; padding: 4px; font-weight: bold; text-align: center; font-size: 8pt; }
+            .signatures { width: 100%; margin-top: 10px; } /* Compactado para compensar a margem maior */
+            .line { border-top: 1px solid #000; width: 85%; margin: 20px auto 3px auto; text-align: center; }
+            .resumo-box { float: right; width: 40%; border: 1px solid #000; padding: 5px; background-color: #fafafa; margin-bottom: 6px; }
+            .clear { clear: both; }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <div class="title">Espelho de Ponto Eletrônico</div>
+            <table style="width:100%; border:none; margin:0; font-size: 8.5pt;">
+              <tr style="border:none;">
+                <td style="border:none; padding:1px;"><strong>Funcionário:</strong> ${usuario.nome}</td>
+                <td style="border:none; padding:1px; text-align:right;"><strong>Período de Referência:</strong> ${String(mesInt).padStart(2, '0')}/${anoInt}</td>
+              </tr>
+              <tr style="border:none;">
+                <td style="border:none; padding:1px;"><strong>CPF:</strong> ${usuario.cpf || 'Não cadastrado'}</td>
+                <td style="border:none; padding:1px; text-align:right;"><strong>Data de Emissão:</strong> ${new Date().toLocaleDateString('pt-BR')}</td>
+              </tr>
+            </table>
+          </div>
+
+          <table>
+            <thead>
+              <tr>
+                <th width="15%">Data</th>
+                <th width="55%">Marcações Registradas (Horas)</th>
+                <th width="15%">Trabalhadas</th>
+                <th width="15%">Saldo do Dia</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${linhasHtml}
+            </tbody>
+          </table>
+
+          <div class="resumo-box">
+            <strong>Total de Faltas no Período:</strong> ${totalFaltas} dia(s) <br/>
+            <strong>Saldo Acumulado no Mês:</strong> ${formatarMinutosParaHoras(saldoBancoHorasMinutos)}
+          </div>
+          <div class="clear"></div>
+
+          <div class="signatures">
+            <p style="font-size: 7.5pt; text-align: justify; margin: 0 0 10px 0; color: #222;">
+              Reconheço a fidelidade e a exatidão das marcações de horários e períodos aqui expostas, em total conformidade com o artigo 74 da Consolidação das Leis do Trabalho (CLT).
+            </p>
+            <table style="border: none; width: 100%; margin-top: 5px;">
+              <tr style="border: none;">
+                <td style="border: none; width: 50%; text-align: center; padding: 0;">
+                  <div class="line"></div>
+                  <strong>${usuario.nome}</strong><br/>
+                  <span style="font-size:7.5pt; color:#444;">Assinatura do Funcionário</span>
+                </td>
+                <td style="border: none; width: 50%; text-align: center; padding: 0;">
+                  <div class="line"></div>
+                  <strong>Representante Legal</strong><br/>
+                  <span style="font-size:7.5pt; color:#444;">Assinatura do Empregador</span>
+                </td>
+              </tr>
+            </table>
+          </div>
+        </body>
+        </html>
+      `;
+
+      // 3. Converte a string HTML estruturada diretamente em Buffer de PDF
+      const options = { format: 'A4' };
+      const file = { content: htmlCompleto };
+
+      HTMLPDF.generatePdf(file, options).then((pdfBuffer: Buffer) => {
+        res.setHeader('Content-Type', 'application/pdf');
+        res.setHeader('Content-Disposition', `attachment; filename=espelho-ponto-${usuarioId}.pdf`);
+        res.status(200).send(pdfBuffer);
+      });
+
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ erro: 'Falha crítica ao renderizar arquivo de impressão do espelho.' });
     }
   }
 };
