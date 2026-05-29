@@ -3,33 +3,55 @@ import { prisma } from '../config/prisma';
 
 export const HorarioController = {
   // 1. CRIAR JORNADA
-  async criarHorario(req: Request, res: Response): Promise<void> {
+async criarHorario(req: Request, res: Response): Promise<void> {
     try {
-      const { descricao, tipoEscala, regrasDias, trabalhaDomingoAlt, domingoInicioImpar } = req.body;
+      const { 
+        descricao, 
+        tipoEscala, 
+        regrasDias, 
+        trabalhaDomingoAlt, 
+        domingoInicioImpar,
+        utilizaAlmocoAutomatico,
+        duracaoAlmocoMinutos,
+        entradaAlternada, // 👈 Captura do payload do front
+        saidaAlternada    // 👈 Captura do payload do front
+      } = req.body;
 
+      const administradorId = req.usuario?.id;
+      const ip = req.ip || req.socket.remoteAddress;
 
+      // Se for SEMANAL, busca do array. Se for ALTERNADA, assume as variáveis dedicadas
+      let entradaFinal = "08:00";
+      let saidaFinal = "17:00";
 
-      const administradorId = req.usuario?.id; // 🪛 Captura o ID do admin logado
-      const ip = req.ip || req.socket.remoteAddress; // 🪛 Captura o IP de origem da requisição
+      if (tipoEscala === 'ALTERNADA') {
+        entradaFinal = entradaAlternada || "07:00";
+        saidaFinal = saidaAlternada || "19:00";
+      } else {
+        const regraSegunda = regrasDias?.find((d: any) => d.numero === 1) || { entrada: "08:00", saida: "17:00" };
+        entradaFinal = regraSegunda.entrada;
+        saidaFinal = regraSegunda.saida;
+      }
 
-      const regraSegunda = regrasDias?.find((d: any) => d.numero === 1) || { entrada: "08:00", saida: "17:00" };
       const regraSabado  = regrasDias?.find((d: any) => d.numero === 6) || { trabalha: false, entrada: "08:00", saida: "12:00" };
       const regraDomingo = regrasDias?.find((d: any) => d.numero === 0) || { trabalha: false, entrada: "08:00", saida: "12:00" };
 
-      // Executa a inserção do Horário e do Log juntos de forma atômica
       const [novoHorario] = await prisma.$transaction([
         prisma.horario.create({
           data: {
             descricao,
             tipoEscala: tipoEscala || 'SEMANAL',
-            horaEntradaPadrao: regraSegunda.entrada,
-            horaSaidaPadrao: regraSegunda.saida,
+            horaEntradaPadrao: entradaFinal, // 🔒 Grava o valor correto condicional
+            horaSaidaPadrao: saidaFinal,     // 🔒 Grava o valor correto condicional
             
-            trabalhaSabado: regraSabado.trabalha,
+            utilizaAlmocoAutomatico: utilizaAlmocoAutomatico !== undefined ? utilizaAlmocoAutomatico : true,
+            duracaoAlmocoMinutos: utilizaAlmocoAutomatico !== undefined ? Number(duracaoAlmocoMinutos) : 60,
+
+            trabalhaSabado: tipoEscala === 'ALTERNADA' ? false : (regraSabado.trabalha || false),
             horaEntradaSabado: regraSabado.entrada,
             horaSaidaSabado: regraSabado.saida,
             
-            trabalhaDomingo: regraDomingo.trabalha,
+            trabalhaDomingo: tipoEscala === 'ALTERNADA' ? false : (regraDomingo.trabalha || false),
             horaEntradaDomingo: regraDomingo.entrada,
             horaSaidaDomingo: regraDomingo.saida,
             
@@ -38,19 +60,17 @@ export const HorarioController = {
           }
         }),
 
-        // 🛡️ REGISTRO DA CRIAÇÃO NA TABELA DE AUDITORIA (Compatível com o Schema)
         prisma.logAuditoria.create({
           data: {
             acao: 'CREATE',
-            entidade: 'Horario', // Vinculado ao modelo Horario
+            entidade: 'Horario',
             usuarioAcaoId: administradorId || null,
             ipOrigem: ip || null,
-            dadosAnteriores: {}, // Sem estado anterior pois é um registro novo
-            dadosNovos: { // Salva o payload completo criado
+            dadosAnteriores: {},
+            dadosNovos: { 
               descricao,
-              entradaSemana: `${regraSegunda.entrada} - ${regraSegunda.saida}`,
-              trabalhaSabado: regraSabado.trabalha,
-              trabalhaDomingo: regraDomingo.trabalha
+              escala: tipoEscala,
+              horarioEfetivo: `${entradaFinal} - ${saidaFinal}`
             }
           }
         })
@@ -80,65 +100,92 @@ export const HorarioController = {
   async atualizarHorario(req: Request, res: Response): Promise<void> {
     try {
       const { id } = req.params;
-      const { descricao, tipoEscala, regrasDias, trabalhaDomingoAlt, domingoInicioImpar } = req.body;
+      const { 
+        descricao, 
+        tipoEscala, 
+        regrasDias, 
+        trabalhaDomingoAlt, 
+        domingoInicioImpar,
+        utilizaAlmocoAutomatico,
+        duracaoAlmocoMinutos,
+        entradaAlternada, // 👈 Captura do payload do front
+        saidaAlternada    // 👈 Captura do payload do front
+      } = req.body;
 
       const administradorId = req.usuario?.id;
       const ip = req.ip || req.socket.remoteAddress;
 
-      // 1. Busca o estado atual do Horário ANTES da modificação para compor a auditoria completa
       const horarioExistente = await prisma.horario.findUnique({ where: { id } });
       if (!horarioExistente) {
         res.status(404).json({ erro: 'Jornada não encontrada.' });
         return;
       }
 
-      const interrogadoSegunda = regrasDias?.find((d: any) => d.numero === 1);
+      const escalaAtual = tipoEscala || horarioExistente.tipoEscala;
+      let entradaFinal = horarioExistente.horaEntradaPadrao;
+      let saidaFinal = horarioExistente.horaSaidaPadrao;
+
+      if (escalaAtual === 'ALTERNADA') {
+        // Se mudou ou informou novos horários de plantão, atualiza
+        if (entradaAlternada) entradaFinal = entradaAlternada;
+        if (saidaAlternada) saidaFinal = saidaAlternada;
+      } else {
+        const interrogadoSegunda = regrasDias?.find((d: any) => d.numero === 1);
+        if (interrogadoSegunda) {
+          entradaFinal = interrogadoSegunda.entrada;
+          saidaFinal = interrogadoSegunda.saida;
+        }
+      }
+
       const interrogadoSabado  = regrasDias?.find((d: any) => d.numero === 6);
       const interrogadoDomingo = regrasDias?.find((d: any) => d.numero === 0);
 
-      // 2. Executa a alteração e o registro histórico juntos
       const [horarioAtualizado] = await prisma.$transaction([
         prisma.horario.update({
           where: { id },
           data: {
             descricao: descricao || horarioExistente.descricao,
-            tipoEscala: tipoEscala || horarioExistente.tipoEscala,
-            ...(interrogadoSegunda && {
-              horaEntradaPadrao: interrogadoSegunda.entrada,
-              horaSaidaPadrao: interrogadoSegunda.saida
-            }),
-            ...(interrogadoSabado && {
+            tipoEscala: escalaAtual,
+            horaEntradaPadrao: entradaFinal, // 🔒 Persiste a correção
+            horaSaidaPadrao: saidaFinal,     // 🔒 Persiste a correção
+            
+            ...(escalaAtual !== 'ALTERNADA' && interrogadoSabado && {
               trabalhaSabado: interrogadoSabado.trabalha,
               horaEntradaSabado: interrogadoSabado.entrada,
               horaSaidaSabado: interrogadoSabado.saida
             }),
-            ...(interrogadoDomingo && {
+            ...(escalaAtual !== 'ALTERNADA' && interrogadoDomingo && {
               trabalhaDomingo: interrogadoDomingo.trabalha,
               horaEntradaDomingo: interrogadoDomingo.entrada,
               horaSaidaDomingo: interrogadoDomingo.saida
             }),
+            
+            utilizaAlmocoAutomatico: utilizaAlmocoAutomatico !== undefined ? utilizaAlmocoAutomatico : horarioExistente.utilizaAlmocoAutomatico,
+            duracaoAlmocoMinutos: duracaoAlmocoMinutos !== undefined ? Number(duracaoAlmocoMinutos) : horarioExistente.duracaoAlmocoMinutos,
             trabalhaDomingoAlt: trabalhaDomingoAlt !== undefined ? trabalhaDomingoAlt : horarioExistente.trabalhaDomingoAlt,
             domingoInicioImpar: domingoInicioImpar !== undefined ? domingoInicioImpar : horarioExistente.domingoInicioImpar
           }
         }),
 
-        // 🛡️ REGISTRO DA ATUALIZAÇÃO NO LOG DE AUDITORIA (Estado completo Antes vs Depois)
         prisma.logAuditoria.create({
           data: {
             acao: 'UPDATE',
             entidade: 'Horario',
             usuarioAcaoId: administradorId || null,
             ipOrigem: ip || null,
-            dadosAnteriores: horarioExistente as any, // Estado original capturado da memória
-            dadosNovos: { // Novos dados consolidados submetidos
+            dadosAnteriores: horarioExistente as any,
+            dadosNovos: { 
               descricao: descricao || horarioExistente.descricao,
-              trabalhaDomingoAlt: trabalhaDomingoAlt !== undefined ? trabalhaDomingoAlt : horarioExistente.trabalhaDomingoAlt
+              utilizaAlmocoAutomatico,
+              duracaoAlmocoMinutos,
+              horaEntradaPadrao: entradaFinal,
+              horaSaidaPadrao: saidaFinal
             }
           }
         })
       ]);
 
-      res.status(200).json({ mensagem: 'Jornada updated com sucesso!', horario: horarioAtualizado });
+      res.status(200).json({ mensagem: 'Jornada atualizada com sucesso!', horario: horarioAtualizado });
     } catch (error) {
       console.error(error);
       res.status(500).json({ erro: 'Erro interno ao atualizar jornada.' });

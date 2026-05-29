@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { prisma } from '../config/prisma';
 
 export const PontoController = {
+  // 1. REGISTRAR PONTO (MOBILE/PRODUÇÃO)
   async registrarPonto(req: Request, res: Response): Promise<void> {
     try {
       const { usuarioId, fotoBase64, latitude, longitude, dataHora } = req.body;
@@ -12,7 +13,6 @@ export const PontoController = {
         return;
       }
 
-      // 1. Verifica se o funcionário existe no banco
       const usuario = await prisma.usuario.findUnique({
         where: { id: usuarioId },
       });
@@ -22,7 +22,6 @@ export const PontoController = {
         return;
       }
 
-      // 2. Transação isolada e explicitamente tipada para o TypeScript resolver os operadores
       const resultado = await prisma.$transaction([
         prisma.batidaPonto.create({
           data: {
@@ -52,7 +51,6 @@ export const PontoController = {
         })
       ]);
 
-      // Captura o primeiro elemento do array retornado (a batida criada)
       const batidaCriada = resultado[0];
 
       res.status(201).json({
@@ -66,6 +64,7 @@ export const PontoController = {
     }
   },
 
+  // 2. LISTAR BATIDAS BRUTAS
   async listarBatidas(req: Request, res: Response): Promise<void> {
     try {
       const batidas = await prisma.batidaPonto.findMany({
@@ -90,6 +89,236 @@ export const PontoController = {
     } catch (error) {
       console.error('Erro ao listar batidas:', error);
       res.status(500).json({ erro: 'Erro interno ao buscar batidas de ponto.' });
+    }
+  },
+
+  // 3. AJUSTAR/ALTERAR MARCAÇÃO EXISTENTE (COM HISTÓRICO + LOG AUDITORIA ATÔMICO)
+  async ajustarBatidaPonto(req: Request, res: Response): Promise<void> {
+    try {
+      const { batidaId } = req.params;
+      const { novaHora, novaData, justificativa } = req.body;
+      const quemAlterouId = req.usuario?.id; 
+      const ip = req.ip || req.socket.remoteAddress;
+
+      if (!justificativa || justificativa.trim().length < 10) {
+        res.status(400).json({ erro: 'Uma justificativa de no mínimo 10 caracteres é obrigatória.' });
+        return;
+      }
+
+      const batidaOriginal = await prisma.batidaPonto.findUnique({
+        where: { id: batidaId },
+        include: { 
+          usuario: { select: { nome: true, cpf: true } },
+          modificacoes: { orderBy: { createdAt: 'desc' }, take: 1 } 
+        }
+      });
+
+      if (!batidaOriginal) {
+        res.status(404).json({ erro: 'Registro de ponto não encontrado.' });
+        return;
+      }
+
+      const dataHoraAnteriorDeReferencia = batidaOriginal.modificacoes.length > 0 
+        ? batidaOriginal.modificacoes[0].dataHoraNova 
+        : batidaOriginal.dataHora;
+
+      // Cálculo seguro de Timezone Local para evitar o bug do "dia anterior"
+      const [horas, minutos] = novaHora.split(':').map(Number);
+      let novaDataHoraEfetiva: Date;
+
+      if (novaData) {
+        const [ano, mes, dia] = novaData.split('-').map(Number);
+        novaDataHoraEfetiva = new Date(ano, mes - 1, dia, horas, minutos, 0, 0);
+      } else {
+        novaDataHoraEfetiva = new Date(dataHoraAnteriorDeReferencia);
+        novaDataHoraEfetiva.setHours(horas, minutos, 0, 0);
+      }
+
+      // 🔥 TRANSAÇÃO ATÔMICA: Grava o Histórico de Modificação E o Log de Auditoria
+      const [logHistorico] = await prisma.$transaction([
+        prisma.historicoModificacaoPonto.create({
+          data: {
+            batidaPontoId: batidaId,
+            dataHoraAnterior: dataHoraAnteriorDeReferencia,
+            dataHoraNova: novaDataHoraEfetiva,
+            justificativa: justificativa,
+            alteradoPorId: quemAlterouId || null
+          }
+        }),
+        prisma.logAuditoria.create({
+          data: {
+            acao: 'UPDATE',
+            entidade: 'BatidaPonto',
+            usuarioAcaoId: quemAlterouId || null,
+            ipOrigem: ip || null,
+            dadosAnteriores: {
+              batidaId,
+              funcionario: batidaOriginal.usuario.nome,
+              horarioAnterior: dataHoraAnteriorDeReferencia.toISOString()
+            },
+            dadosNovos: {
+              horarioNovo: novaDataHoraEfetiva.toISOString(),
+              justificativa,
+              info: "Ajuste manual de horário efetuado via Painel Administrativo."
+            }
+          }
+        })
+      ]);
+
+      res.status(200).json({
+        mensagem: 'Histórico de modificação e logs de auditoria gravados com sucesso.',
+        historico: logHistorico
+      });
+
+    } catch (error) {
+      console.error('Erro ao gravar histórico de modificação:', error);
+      res.status(500).json({ erro: 'Erro interno ao processar modificação.' });
+    }
+  },
+
+  // 4. INCLUSÃO MANUAL DO ZERO (COM HISTÓRICO + LOG AUDITORIA ATÔMICO)
+  async incluirPontoManualmente(req: Request, res: Response): Promise<void> {
+    try {
+      const { usuarioId, dataDia, hora, justificativa } = req.body;
+      const quemAlterouId = req.usuario?.id;
+      const ip = req.ip || req.socket.remoteAddress;
+
+      if (!usuarioId || !dataDia || !hora || !justificativa || justificativa.trim().length < 10) {
+        res.status(400).json({ erro: 'Todos os campos, incluindo justificativa de no mínimo 10 caracteres, são obrigatórios.' });
+        return;
+      }
+
+      const usuario = await prisma.usuario.findUnique({ where: { id: usuarioId } });
+      if (!usuario) {
+        res.status(404).json({ erro: 'Funcionário não encontrado' });
+        return;
+      }
+
+      const [ano, mes, dia] = dataDia.split('-').map(Number);
+      const [horas, minutos] = hora.split(':').map(Number);
+      const novaDataHoraEfetiva = new Date(ano, mes - 1, dia, horas, minutos, 0, 0);
+
+      const resultado = await prisma.$transaction(async (tx) => {
+        const novaBatida = await tx.batidaPonto.create({
+          data: {
+            usuarioId,
+            dataHora: novaDataHoraEfetiva,
+            fotoBase64: "INCLUSAO_MANUAL_ADMIN", 
+            latitude: 0,
+            longitude: 0
+          }
+        });
+
+        await tx.historicoModificacaoPonto.create({
+          data: {
+            batidaPontoId: novaBatida.id,
+            dataHoraAnterior: novaDataHoraEfetiva, 
+            dataHoraNova: novaDataHoraEfetiva,
+            justificativa: `[Inclusão Manual] ${justificativa}`,
+            alteradoPorId: quemAlterouId || null
+          }
+        });
+
+        // 🔥 LOG DE AUDITORIA DO PROCESSO DE INCLUSÃO MANUAL
+        await tx.logAuditoria.create({
+          data: {
+            acao: 'CREATE',
+            entidade: 'BatidaPonto',
+            usuarioAcaoId: quemAlterouId || null,
+            ipOrigem: ip || null,
+            dadosAnteriores: {},
+            dadosNovos: {
+              usuarioNome: usuario.nome,
+              cpf: usuario.cpf,
+              horarioIncluido: novaDataHoraEfetiva.toISOString(),
+              justificativa,
+              info: "Inclusão forçada de marcação de ponto realizada pelo Admin."
+            }
+          }
+        });
+
+        return novaBatida;
+      });
+
+      res.status(201).json({
+        mensagem: 'Marcação incluída manualmente e registrada na trilha de auditoria.',
+        batida: resultado
+      });
+
+    } catch (error) {
+      console.error('Erro ao incluir ponto manualmente:', error);
+      res.status(500).json({ erro: 'Erro interno ao processar inclusão manual.' });
+    }
+  },
+
+  // 5. DESCONSIDERAR MARCAÇÃO/DELEÇÃO LÓGICA (COM HISTÓRICO + LOG AUDITORIA ATÔMICO)
+  async desconsiderarBatidaPonto(req: Request, res: Response): Promise<void> {
+    try {
+      const { batidaId } = req.params;
+      const { justificativa } = req.body;
+      const quemAlterouId = req.usuario?.id; 
+      const ip = req.ip || req.socket.remoteAddress;
+
+      if (!justificativa || justificativa.trim().length < 10) {
+        res.status(400).json({ erro: 'Uma justificativa de no mínimo 10 caracteres é obrigatória para desconsiderar um ponto.' });
+        return;
+      }
+
+      const batidaOriginal = await prisma.batidaPonto.findUnique({
+        where: { id: batidaId },
+        include: { 
+          usuario: { select: { nome: true, cpf: true } },
+          modificacoes: { orderBy: { createdAt: 'desc' }, take: 1 } 
+        }
+      });
+
+      if (!batidaOriginal) {
+        res.status(404).json({ erro: 'Registro de ponto não encontrado.' });
+        return;
+      }
+
+      const dataHoraAnterior = batidaOriginal.modificacoes.length > 0 
+        ? batidaOriginal.modificacoes[0].dataHoraNova 
+        : batidaOriginal.dataHora;
+
+      // 🔥 TRANSAÇÃO ATÔMICA: Grava o Cancelamento no Histórico E gera o Log de Deleção
+      await prisma.$transaction([
+        prisma.historicoModificacaoPonto.create({
+          data: {
+            batidaPontoId: batidaId,
+            dataHoraAnterior: dataHoraAnterior,
+            dataHoraNova: new Date(0), // Data Epoch (1970) sinaliza exclusão lógica para o relatório
+            justificativa: `[PONTO DESCONSIDERADO] ${justificativa}`,
+            alteradoPorId: quemAlterouId || null
+          }
+        }),
+        prisma.logAuditoria.create({
+          data: {
+            acao: 'DELETE', // Identificação semântica de remoção
+            entidade: 'BatidaPonto',
+            usuarioAcaoId: quemAlterouId || null,
+            ipOrigem: ip || null,
+            dadosAnteriores: {
+              batidaId,
+              funcionario: batidaOriginal.usuario.nome,
+              horarioQueSumiu: dataHoraAnterior.toISOString()
+            },
+            dadosNovos: {
+              justificativa,
+              statusFinal: "DESCONSIDERADO_DO_ESPELHO",
+              info: "Marcação de ponto desativada logicamente da folha mensal."
+            }
+          }
+        })
+      ]);
+
+      res.status(200).json({
+        mensagem: 'Marcação desconsiderada com sucesso e documentada no histórico de auditoria.'
+      });
+
+    } catch (error) {
+      console.error('Erro ao desconsiderar ponto:', error);
+      res.status(500).json({ erro: 'Erro interno ao processar exclusão lógica.' });
     }
   }
 };
