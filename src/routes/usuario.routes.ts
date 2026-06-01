@@ -7,5 +7,6 @@ const usuarioRoutes = Router();
 usuarioRoutes.post('/', UsuarioController.criarUsuario);
 usuarioRoutes.get('/', UsuarioController.listarUsuarios);
 usuarioRoutes.put('/:id', UsuarioController.atualizarUsuario);
+usuarioRoutes.delete('/:id', UsuarioController.excluirUsuario);
 
 export { usuarioRoutes };

@@ -17,17 +17,8 @@ const formatarMinutosParaHoras = (minutosTotais: number): string => {
   return `${sinal}${String(horas).padStart(2, '0')}:${String(minutos).padStart(2, '0')}`;
 };
 
-// Função para descobrir o número da semana no ano (1 a 52) para escala alternada
-const obterNumeroSemanaAno = (data: Date): number => {
-  const d = new Date(Date.UTC(data.getFullYear(), data.getMonth(), data.getDate()));
-  const diaNum = d.getUTCDay() || 7;
-  d.setUTCDate(d.getUTCDate() + 4 - diaNum);
-  const anoInicio = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
-  return Math.ceil((((d.getTime() - anoInicio.getTime()) / 86400000) + 1) / 7);
-};
-
 export const RelatorioController = {
-  // 1. DASHBOARD GERAL
+  // 1. DASHBOARD GERAL (Rota: GET /api/relatorios/dashboard)
   async dashboardGeral(req: Request, res: Response): Promise<void> {
     try {
       const hoje = new Date();
@@ -80,7 +71,7 @@ export const RelatorioController = {
     }
   },
 
-  // 2. EMISSÃO DO ESPELHO DE PONTO EM JSON
+  // 2. EMISSÃO DO ESPELHO DE PONTO EM JSON (Rota: GET /api/relatorios/funcionario/:usuarioId)
   async relatorioMensalPorFuncionario(req: Request, res: Response): Promise<void> {
     try {
       const { usuarioId } = req.params;
@@ -93,7 +84,7 @@ export const RelatorioController = {
 
       const usuario = await prisma.usuario.findUnique({
         where: { id: usuarioId },
-        include: { horarioBase: true }
+        include: { Horario: true, afastamentos: true }
       });
 
       if (!usuario) {
@@ -132,8 +123,30 @@ export const RelatorioController = {
       for (let dia = 1; dia <= totalDiasNoMes; dia++) {
         const dataCorrente = new Date(anoInt, mesInt - 1, dia);
         const dataCorrenteStr = `${anoInt}-${String(mesInt).padStart(2, '0')}-${String(dia).padStart(2, '0')}`;
+        const dataAfastamentoCheck = new Date(`${anoInt}-${String(mesInt).padStart(2, '0')}-${String(dia).padStart(2, '0')}T12:00:00.000Z`);
         
         const diaSemanaNum = dataCorrente.getDay();
+
+        // 🏝️ 1. VALIDAÇÃO DE REGIME DE AFASTAMENTO/FÉRIAS ANTES DE QUALQUER CÁLCULO
+        const afastamentoDoDia = usuario?.afastamentos?.find((af) => {
+          const inicio = new Date(af.dataInicio);
+          const fim = new Date(af.dataFim);
+          inicio.setHours(0, 0, 0, 0);
+          fim.setHours(23, 59, 59, 999);
+          return dataAfastamentoCheck >= inicio && dataAfastamentoCheck <= fim;
+        });
+
+        if (afastamentoDoDia) {
+          historicoDias.push({
+            data: dataCorrenteStr,
+            status: 'AFASTADO',
+            batidas: [],
+            horasTrabalhadas: '00:00',
+            saldoDoDia: '00:00',
+            observacao: `[${afastamentoDoDia.tipo.replace('_', ' ')}] - ${afastamentoDoDia.justificativa}`
+          });
+          continue;
+        }
 
         const batidasDoDia = todasBatidas.filter(b => {
           const dataB = b.dataHora;
@@ -154,8 +167,8 @@ export const RelatorioController = {
         let entradaEsperadaStr = '';
         let saidaEsperadaStr = '';
 
-        if (usuario.horarioBase) {
-          const h = usuario.horarioBase;
+        if (usuario.Horario) {
+          const h = usuario.Horario;
           if (h.tipoEscala === 'SEMANAL') {
             if (diaSemanaNum >= 1 && diaSemanaNum <= 5) {
               trabalhaNoDia = true; 
@@ -173,8 +186,8 @@ export const RelatorioController = {
               }
             }
           } else if (h.tipoEscala === 'ALTERNADA') {
-            const dataReferenciaUsuario = (usuario as any).dataInicioEscala 
-              ? new Date((usuario as any).dataInicioEscala) 
+            const dataReferenciaUsuario = usuario.dataInicioEscala 
+              ? new Date(usuario.dataInicioEscala) 
               : null;
               
             if (dataReferenciaUsuario) {
@@ -214,8 +227,8 @@ export const RelatorioController = {
               const minutosContratuaisEsperados = transformarEmMinutos(saidaEsperadaStr) - transformarEmMinutos(entradaEsperadaStr);
               let cargaHorariaComAlmocoDefinida = minutosContratuaisEsperados;
 
-              if (usuario.horarioBase?.utilizaAlmocoAutomatico) {
-                const duracaoAlmocoConfigurada = usuario.horarioBase.duracaoAlmocoMinutos || 60;
+              if (usuario.Horario?.utilizaAlmocoAutomatico) {
+                const duracaoAlmocoConfigurada = usuario.Horario.duracaoAlmocoMinutos || 60;
                 if (batidasDoDia.length === 2) {
                   minutosTrabalhadosNoDia -= duracaoAlmocoConfigurada;
                   if (minutosTrabalhadosNoDia < 0) minutosTrabalhadosNoDia = 0;
@@ -245,7 +258,7 @@ export const RelatorioController = {
             } else {
               totalFaltas++;
               const minutosContratuaisEsperados = transformarEmMinutos(saidaEsperadaStr) - transformarEmMinutos(entradaEsperadaStr);
-              const cargaDeveriaTerSidoFeita = usuario.horarioBase?.utilizaAlmocoAutomatico ? minutosContratuaisEsperados : (minutosContratuaisEsperados - 60);
+              const cargaDeveriaTerSidoFeita = usuario.Horario?.utilizaAlmocoAutomatico ? minutosContratuaisEsperados : (minutosContratuaisEsperados - 60);
               saldoDoDiaMinutos = -cargaDeveriaTerSidoFeita;
             }
           }
@@ -315,7 +328,7 @@ export const RelatorioController = {
     }
   },
   
-  // 3. GERAÇÃO DO PDF OFICIAL EM PÁGINA ÚNICA
+  // 3. GENERATION DO PDF OFICIAL EM PÁGINA ÚNICA (Rota: GET /api/relatorios/funcionario/:usuarioId/imprimir)
   async emitirPDFEspelho(req: Request, res: Response): Promise<void> {
     try {
       const { usuarioId } = req.params;
@@ -328,7 +341,7 @@ export const RelatorioController = {
 
       const usuario = await prisma.usuario.findUnique({
         where: { id: usuarioId },
-        include: { horarioBase: true }
+        include: { Horario: true, afastamentos: true }
       });
 
       if (!usuario) {
@@ -367,8 +380,30 @@ export const RelatorioController = {
       for (let dia = 1; dia <= totalDiasNoMes; dia++) {
         const dataCorrente = new Date(anoInt, mesInt - 1, dia);
         const dataCorrenteStr = `${String(dia).padStart(2, '0')}/${String(mesInt).padStart(2, '0')}/${anoInt}`;
+        const dataAfastamentoCheck = new Date(`${anoInt}-${String(mesInt).padStart(2, '0')}-${String(dia).padStart(2, '0')}T12:00:00.000Z`);
         
         const diaSemanaNum = dataCorrente.getDay();
+
+        // 🏝️ 1. VALIDAÇÃO DE REGIME DE AFASTAMENTO/FÉRIAS PARA O IMPRESSO
+        const afastamentoDoDia = usuario?.afastamentos?.find((af) => {
+          const inicio = new Date(af.dataInicio);
+          const fim = new Date(af.dataFim);
+          inicio.setHours(0, 0, 0, 0);
+          fim.setHours(23, 59, 59, 999);
+          return dataAfastamentoCheck >= inicio && dataAfastamentoCheck <= fim;
+        });
+
+        if (afastamentoDoDia) {
+          historicoDias.push({
+            data: dataCorrenteStr,
+            status: 'AFASTADO',
+            batidas: [],
+            horasTrabalhadas: '00:00',
+            saldoDoDia: '00:00',
+            observacao: `🏝️ [AFASTAMENTO] - ${afastamentoDoDia.tipo} (${afastamentoDoDia.justificativa})`
+          });
+          continue;
+        }
 
         const batidasDoDia = todasBatidas.filter(b => {
           const dataB = b.dataHora;
@@ -385,12 +420,12 @@ export const RelatorioController = {
 
         batidasDoDia.sort((a, b) => (a as any).dataCalculoReal.getTime() - (b as any).dataCalculoReal.getTime());
 
-        let trabalhaNoDia = false;
+        let trabajaNoDia = false;
         let entradaEsperadaStr = '';
         let saidaEsperadaStr = '';
 
-        if (usuario.horarioBase) {
-          const h = usuario.horarioBase;
+        if (usuario.Horario) {
+          const h = usuario.Horario;
           if (h.tipoEscala === 'SEMANAL') {
             if (diaSemanaNum >= 1 && diaSemanaNum <= 5) {
               trabalhaNoDia = true; 
@@ -408,8 +443,8 @@ export const RelatorioController = {
               }
             }
           } else if (h.tipoEscala === 'ALTERNADA') {
-            const dataReferenciaUsuario = (usuario as any).dataInicioEscala 
-              ? new Date((usuario as any).dataInicioEscala) 
+            const dataReferenciaUsuario = usuario.dataInicioEscala 
+              ? new Date(usuario.dataInicioEscala) 
               : null;
               
             if (dataReferenciaUsuario) {
@@ -449,8 +484,8 @@ export const RelatorioController = {
               const minutosContratuaisEsperados = transformarEmMinutos(saidaEsperadaStr) - transformarEmMinutos(entradaEsperadaStr);
               let cargaHorariaComAlmocoDefinida = minutosContratuaisEsperados;
 
-              if (usuario.horarioBase?.utilizaAlmocoAutomatico) {
-                const duracaoAlmocoConfigurada = usuario.horarioBase.duracaoAlmocoMinutos || 60;
+              if (usuario.Horario?.utilizaAlmocoAutomatico) {
+                const duracaoAlmocoConfigurada = usuario.Horario.duracaoAlmocoMinutos || 60;
                 if (batidasDoDia.length === 2) {
                   minutosTrabalhadosNoDia -= duracaoAlmocoConfigurada;
                   if (minutosTrabalhadosNoDia < 0) minutosTrabalhadosNoDia = 0;
@@ -480,7 +515,7 @@ export const RelatorioController = {
             } else {
               totalFaltas++;
               const minutosContratuaisEsperados = transformarEmMinutos(saidaEsperadaStr) - transformarEmMinutos(entradaEsperadaStr);
-              const cargaDeveriaTerSidoFeita = usuario.horarioBase?.utilizaAlmocoAutomatico ? minutosContratuaisEsperados : (minutosContratuaisEsperados - 60);
+              const cargaDeveriaTerSidoFeita = usuario.Horario?.utilizaAlmocoAutomatico ? minutosContratuaisEsperados : (minutosContratuaisEsperados - 60);
               saldoDoDiaMinutos = -cargaDeveriaTerSidoFeita;
             }
           }
@@ -534,24 +569,33 @@ export const RelatorioController = {
         });
       }
 
-      // 1. Criação das linhas da tabela com padding ultra reduzido (3px) para economizar espaço vertical
       let linhasHtml = '';
       historicoDias.forEach(dia => {
-        const batidasTexto = dia.batidas.length > 0 
-          ? dia.batidas.map(b => b.hora).join('  |  ') 
-          : (dia.status === 'FOLGA' ? '<span style="color:#777; font-style:italic;">FOLGA</span>' : '<span style="color:#dc2626; font-weight:bold;">FALTA UNIFICADA</span>');
+        if (dia.status === 'AFASTADO') {
+          linhasHtml += `
+            <tr style="line-height: 1.1; background-color: #f4fbf7;">
+              <td style="border: 1px solid #444; padding: 3px; text-align: center;">${dia.data}</td>
+              <td colspan="3" style="border: 1px solid #444; padding: 3px; text-align: center; color: #155724; font-weight: bold; font-size: 7.5pt; letter-spacing: 0.3px;">
+                ${dia.observacao}
+              </td>
+            </tr>
+          `;
+        } else {
+          const batidasTexto = dia.batidas.length > 0 
+            ? dia.batidas.map(b => b.hora).join('  |  ') 
+            : (dia.status === 'FOLGA' ? '<span style="color:#777; font-style:italic;">FOLGA</span>' : '<span style="color:#dc2626; font-weight:bold;">FALTA UNIFICADA</span>');
 
-        linhasHtml += `
-          <tr style="line-height: 1.1;">
-            <td style="border: 1px solid #444; padding: 3px; text-align: center;">${dia.data}</td>
-            <td style="border: 1px solid #444; padding: 3px; text-align: left; padding-left: 8px; letter-spacing: 0.3px;">${batidasTexto}</td>
-            <td style="border: 1px solid #444; padding: 3px; text-align: center;">${dia.horasTrabalhadas}</td>
-            <td style="border: 1px solid #444; padding: 3px; text-align: center;">${dia.saldoDoDia}</td>
-          </tr>
-        `;
+          linhasHtml += `
+            <tr style="line-height: 1.1;">
+              <td style="border: 1px solid #444; padding: 3px; text-align: center;">${dia.data}</td>
+              <td style="border: 1px solid #444; padding: 3px; text-align: left; padding-left: 8px; letter-spacing: 0.3px;">${batidasTexto}</td>
+              <td style="border: 1px solid #444; padding: 3px; text-align: center;">${dia.horasTrabalhadas}</td>
+              <td style="border: 1px solid #444; padding: 3px; text-align: center;">${dia.saldoDoDia}</td>
+            </tr>
+          `;
+        }
       });
 
-      // 2. HTML Calibrado com CSS de compressão cirúrgica para caber tudo em 1 Página A4
       const htmlCompleto = `
         <!DOCTYPE html>
         <html>
@@ -560,7 +604,7 @@ export const RelatorioController = {
           <style>
             @page { 
               size: A4; 
-              margin: 12mm 12mm 10mm 12mm; /* 📝 Margens ampliadas para melhor visualização física */
+              margin: 12mm 12mm 10mm 12mm;
             }
             body { 
               font-family: Arial, sans-serif; 
@@ -574,7 +618,7 @@ export const RelatorioController = {
             .title { text-align: center; font-size: 11pt; font-weight: bold; margin: 0 0 2px 0; text-transform: uppercase; letter-spacing: 0.5px; }
             table { width: 100%; border-collapse: collapse; margin-bottom: 6px; }
             th { border: 1px solid #444; background-color: #eaeaea; padding: 4px; font-weight: bold; text-align: center; font-size: 8pt; }
-            .signatures { width: 100%; margin-top: 10px; } /* Compactado para compensar a margem maior */
+            .signatures { width: 100%; margin-top: 10px; }
             .line { border-top: 1px solid #000; width: 85%; margin: 20px auto 3px auto; text-align: center; }
             .resumo-box { float: right; width: 40%; border: 1px solid #000; padding: 5px; background-color: #fafafa; margin-bottom: 6px; }
             .clear { clear: both; }
@@ -638,7 +682,6 @@ export const RelatorioController = {
         </html>
       `;
 
-      // 3. Converte a string HTML estruturada diretamente em Buffer de PDF
       const options = { format: 'A4' };
       const file = { content: htmlCompleto };
 
