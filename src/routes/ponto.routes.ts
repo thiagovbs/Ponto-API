@@ -5,7 +5,7 @@ import { AuthMiddleware } from '../middlewares/auth.middleware';
 const pontoRoutes = Router();
 
 pontoRoutes.post('/bater', PontoController.registrarPonto);
-pontoRoutes.post('/ajustar', PontoController.ajustarBatidaPonto);
+pontoRoutes.put('/ajustar/:batidaId', PontoController.ajustarBatidaPonto);
 pontoRoutes.post('/incluir-manual', PontoController.incluirPontoManualmente);
 pontoRoutes.post('/desconsiderar/:batidaId', PontoController.desconsiderarBatidaPonto);
 
