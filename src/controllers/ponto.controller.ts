@@ -1,6 +1,12 @@
 import { Request, Response } from 'express';
 import { prisma } from '../config/prisma';
 
+// Função auxiliar para forçar a criação de um objeto Date puramente em formato UTC neutro
+const criarDataUTCLiteral = (ano: number, mes: number, dia: number, horas: number, minutos: number): Date => {
+  // O Date.UTC retorna o timestamp Unix em milissegundos correspondente ao fuso neutro (Z)
+  return new Date(Date.UTC(ano, mes - 1, dia, horas, minutos, 0, 0));
+};
+
 export const PontoController = {
   // 1. REGISTRAR PONTO (MOBILE/PRODUÇÃO)
   async registrarPonto(req: Request, res: Response): Promise<void> {
@@ -22,6 +28,10 @@ export const PontoController = {
         return;
       }
 
+      // 🔒 CORREÇÃO TIMEZONE MOBILE: Garante que a string termine com 'Z' (UTC Puro) antes do construtor
+      const dataHoraTratada = dataHora.endsWith('Z') ? dataHora : `${dataHora}Z`;
+      const dataFinalPonto = new Date(dataHoraTratada);
+
       const resultado = await prisma.$transaction([
         prisma.batidaPonto.create({
           data: {
@@ -29,7 +39,7 @@ export const PontoController = {
             fotoBase64,
             latitude,
             longitude,
-            dataHora: new Date(dataHora),
+            dataHora: dataFinalPonto,
           },
         }),
         prisma.logAuditoria.create({
@@ -44,7 +54,7 @@ export const PontoController = {
               cpf: usuario.cpf,
               latitude,
               longitude,
-              dataHora,
+              dataHora: dataFinalPonto.toISOString(),
               info: "Marcação de ponto efetuada via Mobile."
             }
           }
@@ -92,7 +102,7 @@ export const PontoController = {
     }
   },
 
-  // 3. AJUSTAR/ALTERAR MARCAÇÃO EXISTENTE (COM HISTÓRICO + LOG AUDITORIA ATÔMICO)
+  // 3. AJUSTAR/ALTERAR MARCAÇÃO EXISTENTE (SINCRO WEB BLINDADA)
   async ajustarBatidaPonto(req: Request, res: Response): Promise<void> {
     try {
       const { batidaId } = req.params;
@@ -122,19 +132,21 @@ export const PontoController = {
         ? batidaOriginal.modificacoes[0].dataHoraNova 
         : batidaOriginal.dataHora;
 
-      // Cálculo seguro de Timezone Local para evitar o bug do "dia anterior"
       const [horas, minutos] = novaHora.split(':').map(Number);
       let novaDataHoraEfetiva: Date;
 
       if (novaData) {
         const [ano, mes, dia] = novaData.split('-').map(Number);
-        novaDataHoraEfetiva = new Date(ano, mes - 1, dia, horas, minutos, 0, 0);
+        // 🔒 CORREÇÃO TIMEZONE WEB AJUSTE: Força a criação literal em fuso neutro
+        novaDataHoraEfetiva = criarDataUTCLiteral(ano, mes, dia, horas, minutos);
       } else {
-        novaDataHoraEfetiva = new Date(dataHoraAnteriorDeReferencia);
-        novaDataHoraEfetiva.setHours(horas, minutos, 0, 0);
+        // Se manteve a mesma data, extraímos os componentes UTC do registro de referência
+        const ano = dataHoraAnteriorDeReferencia.getUTCFullYear();
+        const mes = dataHoraAnteriorDeReferencia.getUTCMonth() + 1;
+        const dia = dataHoraAnteriorDeReferencia.getUTCDate();
+        novaDataHoraEfetiva = criarDataUTCLiteral(ano, mes, dia, horas, minutos);
       }
 
-      // 🔥 TRANSAÇÃO ATÔMICA: Grava o Histórico de Modificação E o Log de Auditoria
       const [logHistorico] = await prisma.$transaction([
         prisma.historicoModificacaoPonto.create({
           data: {
@@ -176,7 +188,7 @@ export const PontoController = {
     }
   },
 
-  // 4. INCLUSÃO MANUAL DO ZERO (COM HISTÓRICO + LOG AUDITORIA ATÔMICO)
+  // 4. INCLUSÃO MANUAL DO ZERO (SINCRO WEB BLINDADA)
   async incluirPontoManualmente(req: Request, res: Response): Promise<void> {
     try {
       const { usuarioId, dataDia, hora, justificativa } = req.body;
@@ -196,7 +208,9 @@ export const PontoController = {
 
       const [ano, mes, dia] = dataDia.split('-').map(Number);
       const [horas, minutos] = hora.split(':').map(Number);
-      const novaDataHoraEfetiva = new Date(ano, mes - 1, dia, horas, minutos, 0, 0);
+      
+      // 🔒 CORREÇÃO TIMEZONE WEB INCLUSÃO: Substituído o construtor local pelo criador UTC literal
+      const novaDataHoraEfetiva = criarDataUTCLiteral(ano, mes, dia, horas, minutos);
 
       const resultado = await prisma.$transaction(async (tx) => {
         const novaBatida = await tx.batidaPonto.create({
@@ -219,7 +233,6 @@ export const PontoController = {
           }
         });
 
-        // 🔥 LOG DE AUDITORIA DO PROCESSO DE INCLUSÃO MANUAL
         await tx.logAuditoria.create({
           data: {
             acao: 'CREATE',
@@ -251,7 +264,7 @@ export const PontoController = {
     }
   },
 
-  // 5. DESCONSIDERAR MARCAÇÃO/DELEÇÃO LÓGICA (COM HISTÓRICO + LOG AUDITORIA ATÔMICO)
+  // 5. DESCONSIDERAR MARCAÇÃO/DELEÇÃO LÓGICA
   async desconsiderarBatidaPonto(req: Request, res: Response): Promise<void> {
     try {
       const { batidaId } = req.params;
@@ -281,20 +294,19 @@ export const PontoController = {
         ? batidaOriginal.modificacoes[0].dataHoraNova 
         : batidaOriginal.dataHora;
 
-      // 🔥 TRANSAÇÃO ATÔMICA: Grava o Cancelamento no Histórico E gera o Log de Deleção
       await prisma.$transaction([
         prisma.historicoModificacaoPonto.create({
           data: {
             batidaPontoId: batidaId,
             dataHoraAnterior: dataHoraAnterior,
-            dataHoraNova: new Date(0), // Data Epoch (1970) sinaliza exclusão lógica para o relatório
+            dataHoraNova: new Date(0), 
             justificativa: `[PONTO DESCONSIDERADO] ${justificativa}`,
             alteradoPorId: quemAlterouId || null
           }
         }),
         prisma.logAuditoria.create({
           data: {
-            acao: 'DELETE', // Identificação semântica de remoção
+            acao: 'DELETE', 
             entidade: 'BatidaPonto',
             usuarioAcaoId: quemAlterouId || null,
             ipOrigem: ip || null,
