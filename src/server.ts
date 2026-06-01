@@ -8,6 +8,7 @@ import { AuthMiddleware } from './middlewares/auth.middleware';
 import { horarioRoutes } from './routes/horario.routes';
 import { auditoriaRoutes } from './routes/auditoria.routes';
 import { relatorioRoutes } from './routes/relatorio.routes';
+import { afastamentoRoutes } from './routes/afastamentos.routes';
 
 const app = express();
 
@@ -30,6 +31,7 @@ app.use('/api/usuarios', usuarioRoutes);
 app.use('/api/horarios', AuthMiddleware.verificarToken, AuthMiddleware.verificarAdmin, horarioRoutes);
 app.use('/api/auditoria', AuthMiddleware.verificarToken, AuthMiddleware.verificarAdmin, auditoriaRoutes);
 app.use('/api/relatorios', AuthMiddleware.verificarToken, AuthMiddleware.verificarAdmin, relatorioRoutes);
+app.use('/api/afastamentos', AuthMiddleware.verificarToken, AuthMiddleware.verificarAdmin, afastamentoRoutes);
 
 const PORT = process.env.PORT || 3003;
 

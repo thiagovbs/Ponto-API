@@ -36,7 +36,7 @@ export const UsuarioController = {
       const dadosCriacao: any = {
         nome,
         cpf,
-        senha: senhaHash,
+        senhaHash: senhaHash,
         perfil,
         horarioBaseId: perfil === 'FUNCIONARIO' && horarioBaseId ? horarioBaseId : null,
         // 🔥 Salva o campo novo convertendo para Date se houver valor
@@ -109,7 +109,7 @@ export const UsuarioController = {
 
       if (senha && senha.trim() !== '') {
         const salt = await bcrypt.genSalt(10);
-        dadosAtualizacao.senha = await bcrypt.hash(senha, salt);
+        dadosAtualizacao.senhaHash = await bcrypt.hash(senha, salt);
       }
 
       // 3. Executa a atualização e a auditoria de forma atômica

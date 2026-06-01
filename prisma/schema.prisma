@@ -1,125 +1,123 @@
-datasource db {
-  provider = "postgresql"
-}
-
 generator client {
   provider = "prisma-client-js"
 }
 
-// Definição dos perfis de acesso
+datasource db {
+  provider = "postgresql"
+}
+
+model Usuario {
+  id               String         @id @default(uuid())
+  nome             String
+  cpf              String         @unique
+  senhaHash        String
+  perfil           Perfil         @default(FUNCIONARIO)
+  createdAt        DateTime       @default(now()) @map("created_at")
+  updatedAt        DateTime       @updatedAt @map("updated_at")
+  dataInicioEscala DateTime?      @map("data_inicio_escala")
+  horarioBaseId    String?        @map("horario_base_id")
+  batidas          BatidaPonto[]
+  logs             LogAuditoria[]
+  Horario          Horario?       @relation(fields: [horarioBaseId], references: [id])
+  afastamentos     Afastamento[] // 🔒 Adicione esta linha aqui
+
+  @@map("usuarios")
+}
+
+model Horario {
+  id                      String     @id(map: "horarios_pkey") @default(uuid())
+  descricao               String
+  tipoEscala              TipoEscala @default(SEMANAL) @map("tipo_escala")
+  utilizaAlmocoAutomatico Boolean    @default(true) @map("utiliza_almoco_automatico")
+  duracaoAlmocoMinutos    Int        @default(60) @map("duracao_almoco_minutos")
+  horaEntradaPadrao       String     @default("08:00") @map("hora_entrada_padrao")
+  horaSaidaPadrao         String     @default("17:00") @map("hora_saida_padrao")
+  trabalhaSabado          Boolean    @default(false) @map("trabalha_sabado")
+  horaEntradaSabado       String     @default("08:00") @map("hora_entrada_sabado")
+  horaSaidaSabado         String     @default("12:00") @map("hora_saida_sabado")
+  trabalhaDomingo         Boolean    @default(false) @map("trabalha_domingo")
+  horaEntradaDomingo      String     @default("08:00") @map("hora_entrada_domingo")
+  horaSaidaDomingo        String     @default("12:00") @map("hora_saida_domingo")
+  trabalhaDomingoAlt      Boolean    @default(false) @map("trabalha_domingo_alt")
+  domingoInicioImpar      Boolean    @default(true) @map("domingo_inicio_impar")
+  createdAt               DateTime   @default(now()) @map("created_at")
+  usuarios                Usuario[]
+}
+
+model BatidaPonto {
+  id         String   @id @default(uuid())
+  usuarioId  String   @map("usuario_id")
+  dataHora   DateTime @default(now()) @map("data_hora")
+  fotoBase64 String   @map("foto_base64")
+  latitude   Float
+  longitude  Float
+  createdAt  DateTime @default(now()) @map("created_at")
+  usuario    Usuario  @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+  modificacoes HistoricoModificacaoPonto[]
+
+  @@map("batidas_ponto")
+}
+
+model HistoricoModificacaoPonto {
+  id               String   @id @default(uuid())
+  batidaPontoId    String   @map("batida_ponto_id")
+  batidaPonto      BatidaPonto @relation(fields: [batidaPontoId], references: [id], onDelete: Cascade)
+  dataHoraAnterior DateTime @map("data_hora_anterior")
+  dataHoraNova     DateTime @map("data_hora_nova")
+  justificativa    String
+  alteradoPorId    String?  @map("alterado_por_id")
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  @@map("historico_modificacoes_ponto")
+}
+
+model LogAuditoria {
+  id              String   @id @default(uuid())
+  usuarioAcaoId   String?  @map("usuario_acao_id")
+  acao            String
+  entidade        String
+  dadosAnteriores Json?    @map("dados_anteriores")
+  dadosNovos      Json?    @map("dados_novos")
+  ipOrigem        String?  @map("ip_origem")
+  dataHora        DateTime @default(now()) @map("data_hora")
+  usuarioAcao     Usuario? @relation(fields: [usuarioAcaoId], references: [id])
+
+  @@map("logs_auditoria")
+}
+
 enum Perfil {
   ADMIN
   FUNCIONARIO
 }
 
 enum TipoEscala {
-  SEMANAL      // Regime padrão (Segunda a Sexta, Sábado, Domingo fixos)
-  ALTERNADA    // Regime 12x24, 12x36, etc. (Trabalha um dia, folga no outro)
+  SEMANAL
+  ALTERNADA
 }
 
-// Modelo de Usuários (Administradores e Funcionários)
-model Usuario {
-  id               String        @id @default(uuid())
-  nome             String
-  cpf              String        @unique
-  senhaHash        String        // Senha criptografada para acesso web dos admins/funcionários
-  perfil           Perfil        @default(FUNCIONARIO)
-  dataInicioEscala DateTime?     @map("data_inicio_escala")
-  logs             LogAuditoria[]
-  
-  // Relacionamento com a tabela de horários (opcional se for apenas admin)
-  horarioBaseId String?       @map("horario_base_id")
-  horarioBase   Horario?      @relation(fields: [horarioBaseId], references: [id])
-  
-  // Relação de um para muitos com as batidas de ponto
-  batidas       BatidaPonto[]
-  
-  createdAt     DateTime      @default(now()) @map("created_at")
-  updatedAt     DateTime      @updatedAt @map("updated_at")
-
-  @@map("usuarios")
+// 🏝️ 1. ADICIONE O ENUM NO FINAL DO ARQUIVO
+enum TipoAfastamento {
+  FERIAS
+  ATESTADO_MEDICO
+  LICENCA_MATERNIDADE
+  LICENCA_PATERNIDADE
+  AFASTAMENTO_INSS
+  OUTROS
 }
 
-// 🔥 MODELO MANTIDO EXATAMENTE COMO CRIADO ORIGINALMENTE (SEM @@map ALTERADO)
-model Horario {
-  id                      String   @id @default(uuid())
-  descricao               String
-  tipoEscala              TipoEscala   @default(SEMANAL) @map("tipo_escala")
-  horaEntradaPadrao       String   @default("08:00") @map("hora_entrada_padrao")
-  horaSaidaPadrao         String   @default("17:00") @map("hora_saida_padrao")
+// 🏝️ 2. ADICIONE O MODELO NO FINAL DO ARQUIVO
+model Afastamento {
+  id            String          @id @default(uuid())
+  usuarioId     String          @map("usuario_id")
+  usuario       Usuario         @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+  
+  tipo          TipoAfastamento @default(FERIAS)
+  dataInicio    DateTime        @map("data_inicio")
+  dataFim       DateTime        @map("data_fim")
+  justificativa String          @db.Text
+  
+  createdAt     DateTime        @default(now()) @map("created_at")
+  updatedAt     DateTime        @updatedAt @map("updated_at")
 
-  // NOVOS CAMPOS EXIGIDOS PELA AUDITORIA DO MINISTÉRIO DO TRABALHO (PORTARIA 671)
-  utilizaAlmocoAutomatico Boolean   @default(true)  @map("utiliza_almoco_automatico")
-  duracaoAlmocoMinutos    Int       @default(60)    @map("duracao_almoco_minutos")
-  
-  // SÁBADO
-  trabalhaSabado          Boolean  @default(false) @map("trabalha_sabado")
-  horaEntradaSabado       String   @default("08:00") @map("hora_entrada_sabado")
-  horaSaidaSabado         String   @default("12:00") @map("hora_saida_sabado")
-  
-  // DOMINGO UNIFICADO
-  trabalhaDomingo         Boolean  @default(false) @map("trabalha_domingo")
-  horaEntradaDomingo      String   @default("08:00") @map("hora_entrada_domingo")
-  horaSaidaDomingo        String   @default("12:00") @map("hora_saida_domingo")
-  
-  // DOMINGOS ALTERNADOS
-  trabalhaDomingoAlt      Boolean  @default(false) @map("trabalha_domingo_alt")
-  domingoInicioImpar      Boolean  @default(true)  @map("domingo_inicio_impar")
-  
-  usuarios                Usuario[]
-  createdAt               DateTime @default(now()) @map("created_at")
-}
-
-// Modelo para os registros de Ponto Eletrônico
-model BatidaPonto {
-  id           String                      @id @default(uuid())
-  usuarioId    String                      @map("usuario_id")
-  usuario      Usuario                     @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
-  
-  dataHora     DateTime                    @default(now()) @map("data_hora")
-  fotoBase64   String                      @db.Text @map("foto_base64")
-  latitude     Float
-  longitude    Float
-  createdAt    DateTime                    @default(now()) @map("created_at")
-
-  // Relação com a tabela filha de modificações
-  modificacoes HistoricoModificacaoPonto[]
-
-  @@map("batidas_ponto")
-}
-
-// TABELA DE HISTÓRICO DE AUDITORIA DO MTE
-model HistoricoModificacaoPonto {
-  id               String      @id @default(uuid())
-  batidaPontoId    String      @map("batida_ponto_id")
-  batidaPonto      BatidaPonto @relation(fields: [batidaPontoId], references: [id], onDelete: Cascade)
-  
-  dataHoraAnterior DateTime    @map("data_hora_anterior")
-  dataHoraNova     DateTime    @map("data_hora_nova")
-  
-  justificativa    String      @db.Text
-  alteradoPorId    String?     @map("alterado_por_id")
-  
-  createdAt        DateTime    @default(now()) @map("created_at")
-
-  @@map("historico_modificacoes_ponto")
-}
-
-// Modelo de Logs de Auditoria Geral
-model LogAuditoria {
-  id              String   @id @default(uuid())
-  
-  usuarioAcaoId   String?  @map("usuario_acao_id")
-  usuarioAcao     Usuario? @relation(fields: [usuarioAcaoId], references: [id])
-  
-  acao            String   
-  entidade        String   
-  
-  dadosAnteriores Json?    @map("dados_anteriores") 
-  dadosNovos      Json?    @map("dados_novos")      
-  
-  ipOrigem        String?  @map("ip_origem") 
-  dataHora        DateTime @default(now()) @map("data_hora")
-
-  @@map("logs_auditoria")
+  @@map("afastamentos")
 }
