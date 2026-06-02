@@ -3,22 +3,19 @@ import { prisma } from '../config/prisma';
 import bcrypt from 'bcrypt';
 
 export const UsuarioController = {
-  // 1. CADASTRAR NOVO USUÁRIO (ATUALIZADO)
   async criarUsuario(req: Request, res: Response): Promise<void> {
     try {
-      // 🔹 Adicionado 'dataInicioEscala' na desestruturação do corpo
-      const { nome, cpf, senha, perfil, horarioBaseId, dataInicioEscala } = req.body;
+      const { empresaId } = req;
+      const { nome, cpf, senha, perfil, horarioBaseId, dataInicioEscala, filialId, setorId } = req.body;
       
       const administradorId = req.usuario?.id;
       const ip = req.ip || req.socket.remoteAddress;
 
-      // Validação básica
-      if (!nome || !cpf || !senha) {
-        res.status(400).json({ erro: 'Nome, CPF e senha são obrigatórios.' });
+      if (!nome || !cpf || !senha || !filialId || !setorId) {
+        res.status(400).json({ erro: 'Nome, CPF, senha, filial e setor são obrigatórios.' });
         return;
       }
 
-      // Verifica se o CPF já está cadastrado
       const usuarioExistente = await prisma.usuario.findUnique({
         where: { cpf }
       });
@@ -28,26 +25,25 @@ export const UsuarioController = {
         return;
       }
 
-      // Criptografa a senha
       const salt = await bcrypt.genSalt(10);
       const senhaHash = await bcrypt.hash(senha, salt);
 
-      // 🔹 Estruturação dos dados respeitando as regras do Perfil
       const dadosCriacao: any = {
         nome,
         cpf,
         senhaHash: senhaHash,
         perfil,
+        empresaId: empresaId!, 
+        filialId,
+        setorId,
         horarioBaseId: perfil === 'FUNCIONARIO' && horarioBaseId ? horarioBaseId : null,
-        // 🔥 Salva o campo novo convertendo para Date se houver valor
         dataInicioEscala: perfil === 'FUNCIONARIO' && dataInicioEscala ? new Date(dataInicioEscala) : null
       };
 
-      // Salva no banco de dados e registra a auditoria usando uma Transação
       const [novoUsuario] = await prisma.$transaction([
         prisma.usuario.create({
           data: dadosCriacao,
-          select: { id: true, nome: true, cpf: true, perfil: true, horarioBaseId: true, dataInicioEscala: true }
+          select: { id: true, nome: true, cpf: true, perfil: true, horarioBaseId: true, dataInicioEscala: true, filialId: true, setorId: true }
         }),
 
         prisma.logAuditoria.create({
@@ -58,9 +54,12 @@ export const UsuarioController = {
             ipOrigem: ip || null,
             dadosAnteriores: null,
             dadosNovos: {
+              empresaId,
               nome,
               cpf,
               perfil,
+              filialId,
+              setorId,
               horarioBaseId: perfil === 'FUNCIONARIO' && horarioBaseId ? horarioBaseId : null,
               dataInicioEscala: perfil === 'FUNCIONARIO' && dataInicioEscala ? dataInicioEscala : null
             }
@@ -75,21 +74,18 @@ export const UsuarioController = {
     }
   },
 
-  // 2. ATUALIZAR DADOS DO USUÁRIO (ATUALIZADO)
   async atualizarUsuario(req: Request, res: Response): Promise<void> {
     try {
       const { id } = req.params;
-      
-      // 🔹 Captura o novo campo vindo da requisição (req.body)
-      const { nome, cpf, senha, perfil, horarioBaseId, dataInicioEscala } = req.body;
+      const { empresaId } = req;
+      const { nome, cpf, senha, perfil, horarioBaseId, dataInicioEscala, filialId, setorId } = req.body;
       
       const administradorId = req.usuario?.id;
       const ip = req.ip || req.socket.remoteAddress;
 
-      // 1. Busca o estado atual do usuário antes de atualizar (para alimentar a auditoria)
-      const usuarioAntes = await prisma.usuario.findUnique({
-        where: { id },
-        select: { id: true, nome: true, cpf: true, perfil: true, horarioBaseId: true, dataInicioEscala: true }
+      const usuarioAntes = await prisma.usuario.findFirst({
+        where: { id, empresaId: empresaId },
+        select: { id: true, nome: true, cpf: true, perfil: true, horarioBaseId: true, dataInicioEscala: true, filialId: true, setorId: true }
       });
 
       if (!usuarioAntes) {
@@ -97,13 +93,13 @@ export const UsuarioController = {
         return;
       }
 
-      // 2. Monta o objeto de alteração dinamicamente
       const dadosAtualizacao: any = {
         nome,
         cpf,
         perfil,
+        filialId,
+        setorId,
         horarioBaseId: perfil === 'FUNCIONARIO' && horarioBaseId ? horarioBaseId : null,
-        // 🔥 OBRIGATÓRIO: Repassa o campo mapeado do Front-end para salvar no banco
         dataInicioEscala: perfil === 'FUNCIONARIO' && dataInicioEscala ? new Date(dataInicioEscala) : null
       };
 
@@ -112,12 +108,11 @@ export const UsuarioController = {
         dadosAtualizacao.senhaHash = await bcrypt.hash(senha, salt);
       }
 
-      // 3. Executa a atualização e a auditoria de forma atômica
       const [usuarioAtualizado] = await prisma.$transaction([
         prisma.usuario.update({
           where: { id },
           data: dadosAtualizacao,
-          select: { id: true, nome: true, cpf: true, perfil: true, horarioBaseId: true, dataInicioEscala: true }
+          select: { id: true, nome: true, cpf: true, perfil: true, horarioBaseId: true, dataInicioEscala: true, filialId: true, setorId: true }
         }),
 
         prisma.logAuditoria.create({
@@ -128,9 +123,12 @@ export const UsuarioController = {
             ipOrigem: ip || null,
             dadosAnteriores: usuarioAntes as any, 
             dadosNovos: { 
+              empresaId,
               nome,
               cpf,
               perfil,
+              filialId,
+              setorId,
               horarioBaseId: perfil === 'FUNCIONARIO' && horarioBaseId ? horarioBaseId : null,
               dataInicioEscala: perfil === 'FUNCIONARIO' && dataInicioEscala ? dataInicioEscala : null
             }
@@ -145,15 +143,15 @@ export const UsuarioController = {
     }
   },
 
-  // 3. REMOVER USUÁRIO DO SISTEMA (MANTIDO)
   async excluirUsuario(req: Request, res: Response): Promise<void> {
     try {
       const { id } = req.params;
+      const { empresaId } = req;
       const administradorId = req.usuario?.id;
       const ip = req.ip || req.socket.remoteAddress;
 
-      const usuarioAntes = await prisma.usuario.findUnique({
-        where: { id }
+      const usuarioAntes = await prisma.usuario.findFirst({
+        where: { id, empresaId: empresaId }
       });
 
       if (!usuarioAntes) {
@@ -171,7 +169,7 @@ export const UsuarioController = {
             entidade: 'Usuario',
             usuarioAcaoId: administradorId || null,
             ipOrigem: ip || null,
-            dadosAnteriores: usuarioAntes as any,
+            dadosAnteriores: { id: usuarioAntes.id, nome: usuarioAntes.nome, empresaId } as any,
             dadosNovos: null
           }
         })
@@ -184,10 +182,14 @@ export const UsuarioController = {
     }
   },
 
-  // 4. LISTAR TODOS OS USUÁRIOS (MANTIDO)
   async listarUsuarios(req: Request, res: Response): Promise<void> {
     try {
+      const { empresaId } = req;
+
       const usuarios = await prisma.usuario.findMany({
+        where: {
+          empresaId: empresaId
+        },
         orderBy: { nome: 'asc' },
         select: {
           id: true,
@@ -195,7 +197,9 @@ export const UsuarioController = {
           cpf: true,
           perfil: true,
           horarioBaseId: true,
-          dataInicioEscala: true // Incluído por padrão no select geral
+          dataInicioEscala: true,
+          filialId: true,
+          setorId: true
         }
       });
       res.status(200).json(usuarios);

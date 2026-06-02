@@ -40,7 +40,9 @@ export const AuthMiddleware = {
 
   // Middleware 2: Verifica se o usuário tem permissão de Administrador
   verificarAdmin(req: Request, res: Response, next: NextFunction): void { // 🪛 Mudou para Request nativo
-    if (req.usuario?.perfil !== 'ADMIN') {
+    const perfil = req.usuario?.perfil as String;
+
+    if (perfil !== "ADMIN" && perfil !== "SUPER_ADMIN") {
       res.status(403).json({ erro: 'Acesso restrito. Apenas administradores podem executar esta ação.' });
       return;
     }

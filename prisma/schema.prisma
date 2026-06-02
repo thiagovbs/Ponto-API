@@ -6,6 +6,63 @@ datasource db {
   provider = "postgresql"
 }
 
+// ==========================================
+// 🏢 NOVOS MODELOS PARA MULTI-TENANCY E SETORES
+// ==========================================
+
+model Empresa {
+  id           String        @id @default(uuid())
+  razaoSocial  String        @map("razao_social")
+  cnpj         String        @unique
+  tokenTotem   String        @unique @default(uuid()) @map("token_totem") // Hash usado para autenticar o tablet da portaria
+  createdAt    DateTime      @default(now()) @map("created_at")
+  updatedAt    DateTime      @updatedAt @map("updated_at")
+  
+  filiais      Filial[]
+  setores      Setor[]
+  usuarios     Usuario[]
+  batidas      BatidaPonto[]
+  afastamentos Afastamento[]
+  horarios     Horario[]
+
+  @@map("empresas")
+}
+
+model Filial {
+  id        String    @id @default(uuid())
+  nome      String
+  cnpj      String?   // Permite nulo caso herdem o CNPJ da matriz
+  empresaId String    @map("empresa_id")
+  empresa   Empresa   @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  
+  setores   Setor[]
+  usuarios  Usuario[]
+
+  @@map("filiais")
+}
+
+model Setor {
+  id        String        @id @default(uuid())
+  nome      String        // Ex: "TI", "Recursos Humanos", "Logística"
+  empresaId String        @map("empresa_id")
+  empresa   Empresa       @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+  filialId  String        @map("filial_id")
+  filial    Filial        @relation(fields: [filialId], references: [id], onDelete: Cascade)
+  createdAt DateTime      @default(now()) @map("created_at")
+  updatedAt DateTime      @updatedAt @map("updated_at")
+  
+  usuarios  Usuario[]
+  batidas   BatidaPonto[]
+
+  @@map("setores")
+}
+
+// ==========================================
+// 🔄 MODELOS ATUALIZADOS COM HERANÇA MULTI-TENANT
+// ==========================================
+
 model Usuario {
   id               String         @id @default(uuid())
   nome             String
@@ -16,10 +73,19 @@ model Usuario {
   updatedAt        DateTime       @updatedAt @map("updated_at")
   dataInicioEscala DateTime?      @map("data_inicio_escala")
   horarioBaseId    String?        @map("horario_base_id")
+  
+  // 🟢 NOVOS RELACIONAMENTOS OBRIGATÓRIOS DO FUNCIONÁRIO
+  empresaId        String          @default("id-empresa-padrao")@map("empresa_id")
+  empresa          Empresa         @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+  filialId         String          @default("id-filial-padrao") @map("filial_id")
+  filial           Filial          @relation(fields: [filialId], references: [id], onDelete: Cascade)
+  setorId          String          @default("id-setor-padrao") @map("setor_id")
+  setor            Setor           @relation(fields: [setorId], references: [id], onDelete: Cascade)
+
   batidas          BatidaPonto[]
   logs             LogAuditoria[]
   Horario          Horario?       @relation(fields: [horarioBaseId], references: [id])
-  afastamentos     Afastamento[] // 🔒 Adicione esta linha aqui
+  afastamentos     Afastamento[]
 
   @@map("usuarios")
 }
@@ -42,6 +108,10 @@ model Horario {
   domingoInicioImpar      Boolean    @default(true) @map("domingo_inicio_impar")
   createdAt               DateTime   @default(now()) @map("created_at")
   usuarios                Usuario[]
+
+  // 🔒 ADICIONE ESTAS TRÊS LINHAS PARA O ISOLAMENTO MULTI-TENANT:
+  empresaId               String
+  empresa                 Empresa   @relation(fields: [empresaId], references: [id], onDelete: Cascade)
 }
 
 model BatidaPonto {
@@ -53,20 +123,27 @@ model BatidaPonto {
   longitude  Float
   createdAt  DateTime @default(now()) @map("created_at")
   usuario    Usuario  @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+  
+  // 🟢 NOVOS CAMPOS NA BATIDA (Garante rastreabilidade histórica em auditoria se o funcionário mudar de cargo)
+  empresaId  String   @default("id-empresa-padrao") @map("empresa_id")
+  empresa    Empresa  @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+  setorId    String   @default("id-setor-padrao") @map("setor_id")
+  setor      Setor    @relation(fields: [setorId], references: [id], onDelete: Cascade)
+
   modificacoes HistoricoModificacaoPonto[]
 
   @@map("batidas_ponto")
 }
 
 model HistoricoModificacaoPonto {
-  id               String   @id @default(uuid())
-  batidaPontoId    String   @map("batida_ponto_id")
+  id               String      @id @default(uuid())
+  batidaPontoId    String      @map("batida_ponto_id")
   batidaPonto      BatidaPonto @relation(fields: [batidaPontoId], references: [id], onDelete: Cascade)
-  dataHoraAnterior DateTime @map("data_hora_anterior")
-  dataHoraNova     DateTime @map("data_hora_nova")
+  dataHoraAnterior DateTime    @map("data_hora_anterior")
+  dataHoraNova     DateTime    @map("data_hora_nova")
   justificativa    String
-  alteradoPorId    String?  @map("alterado_por_id")
-  createdAt        DateTime @default(now()) @map("created_at")
+  alteradoPorId    String?     @map("alterado_por_id")
+  createdAt        DateTime    @default(now()) @map("created_at")
 
   @@map("historico_modificacoes_ponto")
 }
@@ -85,7 +162,26 @@ model LogAuditoria {
   @@map("logs_auditoria")
 }
 
+model Afastamento {
+  id            String          @id @default(uuid())
+  usuarioId     String          @map("usuario_id")
+  usuario       Usuario         @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+  tipo          TipoAfastamento @default(FERIAS)
+  dataInicio    DateTime        @map("data_inicio")
+  dataFim       DateTime        @map("data_fim")
+  justificativa String          @db.Text
+  createdAt     DateTime        @default(now()) @map("created_at")
+  updatedAt     DateTime        @updatedAt @map("updated_at")
+
+  // 🟢 AFILIAÇÃO MULTI-TENANT NO ABONO
+  empresaId     String          @default("id-empresa-padrao") @map("empresa_id")
+  empresa       Empresa         @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+
+  @@map("afastamentos")
+}
+
 enum Perfil {
+  SUPER_ADMIN
   ADMIN
   FUNCIONARIO
 }
@@ -95,7 +191,6 @@ enum TipoEscala {
   ALTERNADA
 }
 
-// 🏝️ 1. ADICIONE O ENUM NO FINAL DO ARQUIVO
 enum TipoAfastamento {
   FERIAS
   ATESTADO_MEDICO
@@ -103,21 +198,4 @@ enum TipoAfastamento {
   LICENCA_PATERNIDADE
   AFASTAMENTO_INSS
   OUTROS
-}
-
-// 🏝️ 2. ADICIONE O MODELO NO FINAL DO ARQUIVO
-model Afastamento {
-  id            String          @id @default(uuid())
-  usuarioId     String          @map("usuario_id")
-  usuario       Usuario         @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
-  
-  tipo          TipoAfastamento @default(FERIAS)
-  dataInicio    DateTime        @map("data_inicio")
-  dataFim       DateTime        @map("data_fim")
-  justificativa String          @db.Text
-  
-  createdAt     DateTime        @default(now()) @map("created_at")
-  updatedAt     DateTime        @updatedAt @map("updated_at")
-
-  @@map("afastamentos")
 }
