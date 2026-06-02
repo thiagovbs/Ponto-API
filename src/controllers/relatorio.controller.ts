@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { prisma } from '../config/prisma';
 import HTMLPDF from 'html-pdf-node';
+import { gerarConteudoAEF } from '../services/aef.service';
 
 // Funções auxiliares para cálculo de horas
 const transformarEmMinutos = (horarioStr: string): number => {
@@ -695,5 +696,38 @@ export const RelatorioController = {
       console.error(error);
       res.status(500).json({ erro: 'Falha crítica ao renderizar arquivo de impressão do espelho.' });
     }
+  },
+  async downloadAEF(req: Request, res: Response): Promise<void> {
+    try {
+      const { dataInicio, dataFim } = req.query;
+
+      if (!dataInicio || !dataFim) {
+        res.status(400).json({ erro: 'As datas de início e fim são obrigatórias para a extração fiscal.' });
+        return;
+      }
+
+      // Parâmetros fixos da organização empregadora (Podem ser extraídos de variáveis de ambiente futuramente)
+      const CNPJ_EMPRESA = "12345678000199"; 
+      const RAZAO_SOCIAL = "SRO PONTO AUTOMACAO LTDA";
+
+      // Dispara a rotina utilitária que converte os dados do Prisma em colunas de tamanho fixo txt
+      const conteudoTxt = await gerarConteudoAEF(
+        new Date(String(dataInicio)),
+        new Date(String(dataFim)),
+        CNPJ_EMPRESA,
+        RAZAO_SOCIAL
+      );
+
+      // Injeta os headers HTTP adequados para forçar o download de arquivo de texto puro
+      res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+      res.setHeader('Content-Disposition', 'attachment; filename=AEF_Portaria671.txt');
+      
+      res.status(200).send(conteudoTxt);
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ erro: 'Falha crítica ao compilar e estruturar o arquivo fiscal AEF.' });
+    }
   }
+
+
 };

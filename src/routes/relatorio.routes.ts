@@ -12,4 +12,7 @@ relatorioRoutes.get('/funcionario/:usuarioId', RelatorioController.relatorioMens
 // Endpoint: GET /api/relatorios/funcionario/:id
 relatorioRoutes.get('/funcionario/:usuarioId/imprimir', RelatorioController.emitirPDFEspelho);
 
+// Endpoint: GET /api/relatorios/fiscalizacao/aef
+relatorioRoutes.get('/fiscalizacao/aef', RelatorioController.downloadAEF);
+
 export { relatorioRoutes };
