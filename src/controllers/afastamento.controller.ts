@@ -6,7 +6,8 @@ export const AfastamentoController = {
   async cadastrar(req: Request, res: Response): Promise<void> {
     try {
       const { usuarioId, tipo, dataInicio, dataFim, justificativa } = req.body;
-      const quemCadastrouId = req.usuario?.id; // ID do Admin logado pego pelo middleware de autenticação
+      const { empresaId } = req; // 🔒 Injetado pelo Middleware de Tenant
+      const quemCadastrouId = req.usuario?.id;
       const ip = req.ip || req.socket.remoteAddress;
 
       if (!usuarioId || !tipo || !dataInicio || !dataFim || !justificativa) {
@@ -19,6 +20,19 @@ export const AfastamentoController = {
         return;
       }
 
+      // Validação de segurança: Garante que o usuário alvo pertence à mesma empresa do Admin logado
+      const usuarioPertenceAEmpresa = await prisma.usuario.findFirst({
+        where: {
+          id: usuarioId,
+          empresaId: empresaId,
+        }
+      });
+
+      if (!usuarioPertenceAEmpresa) {
+        res.status(403).json({ erro: 'Ação não permitida: O funcionário informado não pertence a esta empresa.' });
+        return;
+      }
+
       // Converte os inputs de data para objetos Date UTC puros
       const inicio = new Date(`${dataInicio}T00:00:00.000Z`);
       const fim = new Date(`${dataFim}T23:59:59.000Z`);
@@ -28,10 +42,11 @@ export const AfastamentoController = {
         return;
       }
 
-      // Validação de segurança: Impede o cadastro se o funcionário já tiver outra ausência ativa no mesmo período
+      // Validação de segurança: Impede o cadastro se o funcionário já tiver outra ausência ativa no mesmo período e mesma empresa
       const conflitoPeriodo = await prisma.afastamento.findFirst({
         where: {
           usuarioId,
+          empresaId, // 🔒 Isolamento de escopo
           OR: [
             { dataInicio: { lte: fim }, dataFim: { gte: inicio } }
           ]
@@ -53,7 +68,8 @@ export const AfastamentoController = {
             tipo,
             dataInicio: inicio,
             dataFim: fim,
-            justificativa
+            justificativa,
+            empresaId: empresaId! // 🔒 Grava vinculando ao Tenant atual
           },
           include: {
             usuario: { select: { nome: true, cpf: true } }
@@ -68,6 +84,7 @@ export const AfastamentoController = {
             ipOrigem: ip || null,
             dadosAnteriores: {},
             dadosNovos: {
+              empresaId,
               funcionarioNome: novoAfastamento.usuario.nome,
               cpf: novoAfastamento.usuario.cpf,
               tipoAfastamento: tipo,
@@ -91,18 +108,23 @@ export const AfastamentoController = {
     }
   },
 
-  // 2. LISTAR TODOS OS AFASTAMENTOS LANÇADOS (COM FILTRO OPCIONAL POR FUNCIONÁRIO)
+  // 2. LISTAR TODOS OS AFASTAMENTOS LANÇADOS (CORRIGIDO E MULTI-TENANT)
   async listar(req: Request, res: Response): Promise<void> {
     try {
       const { usuarioId } = req.query;
+      const { empresaId } = req; // Injetado pelo middleware
 
-      const filtro: any = {};
+      // 🟢 CORRIGIDO: Monta a query espalhando os filtros dinâmicos de forma nativa para o Prisma
+      const whereClause: any = {
+        empresaId: empresaId // 🔒 DADOS ISOLADOS! Nenhuma outra empresa vaza aqui.
+      };
+
       if (usuarioId) {
-        filtro.usuarioId = usuarioId as string;
+        whereClause.usuarioId = usuarioId as string;
       }
 
       const afastamentos = await prisma.afastamento.findMany({
-        where: filtro,
+        where: whereClause,
         include: {
           usuario: {
             select: { nome: true, cpf: true }
@@ -122,16 +144,21 @@ export const AfastamentoController = {
   async deletar(req: Request, res: Response): Promise<void> {
     try {
       const { id } = req.params;
+      const { empresaId } = req;
       const quemDeletouId = req.usuario?.id;
       const ip = req.ip || req.socket.remoteAddress;
 
-      const registro = await prisma.afastamento.findUnique({
-        where: { id },
+      // 🟢 CORRIGIDO: Valida se o registro pertence à empresa antes de deletar (Evita ID spoofing)
+      const registro = await prisma.afastamento.findFirst({
+        where: { 
+          id, 
+          empresaId: empresaId 
+        },
         include: { usuario: { select: { nome: true } } }
       });
 
       if (!registro) {
-        res.status(404).json({ erro: 'Registro de afastamento não localizado.' });
+        res.status(404).json({ erro: 'Registro de afastamento não localizado ou não pertence a esta empresa.' });
         return;
       }
 
@@ -145,6 +172,7 @@ export const AfastamentoController = {
             ipOrigem: ip || null,
             dadosAnteriores: {
               id: registro.id,
+              empresaId,
               funcionario: registro.usuario.nome,
               tipoExcluido: registro.tipo,
               periodoEstornado: `${registro.dataInicio.toISOString()} a ${registro.dataFim.toISOString()}`
@@ -164,7 +192,8 @@ export const AfastamentoController = {
   // 4. ATUALIZAR/EDITAR UM AFASTAMENTO EXISTENTE
   async editar(req: Request, res: Response): Promise<void> {
     try {
-      const { id } = req.params; // ID do afastamento que será alterado
+      const { id } = req.params;
+      const { empresaId } = req;
       const { tipo, dataInicio, dataFim, justificativa } = req.body;
       const quemAlterouId = req.usuario?.id;
       const ip = req.ip || req.socket.remoteAddress;
@@ -179,9 +208,12 @@ export const AfastamentoController = {
         return;
       }
 
-      // Busca o registro original para validar a existência e alimentar os logs de auditoria
-      const afastamentoOriginal = await prisma.afastamento.findUnique({
-        where: { id },
+      // 🟢 CORRIGIDO: Busca usando findFirst com o filtro da empresa para isolamento rigoroso
+      const afastamentoOriginal = await prisma.afastamento.findFirst({
+        where: { 
+          id,  
+          empresaId: empresaId
+        },
         include: { usuario: { select: { id: true, nome: true, cpf: true } } }
       });
 
@@ -199,11 +231,12 @@ export const AfastamentoController = {
         return;
       }
 
-      // Validação de segurança de conflito de período (ignorando o próprio registro que está sendo editado)
+      // Validação de segurança de conflito de período (ignorando o próprio registro e restrito à empresa)
       const conflitoPeriodo = await prisma.afastamento.findFirst({
         where: {
           usuarioId: afastamentoOriginal.usuario.id,
-          id: { not: id }, // Garante que não vai dar conflito com ele mesmo
+          empresaId,
+          id: { not: id },
           OR: [
             { dataInicio: { lte: novoFim }, dataFim: { gte: novoInicio } }
           ]
@@ -238,9 +271,10 @@ export const AfastamentoController = {
             dadosAnteriores: {
               tipo: afastamentoOriginal.tipo,
               periodo: `${afastamentoOriginal.dataInicio.toISOString().split('T')[0]} até ${afastamentoOriginal.dataFim.toISOString().split('T')[0]}`,
-              justificativa:afastamentoOriginal.justificativa
+              justificativa: afastamentoOriginal.justificativa
             },
             dadosNovos: {
+              empresaId,
               funcionarioNome: afastamentoOriginal.usuario.nome,
               tipoAlterado: tipo,
               novoPeriodo: `${dataInicio} até ${dataFim}`,
@@ -254,7 +288,7 @@ export const AfastamentoController = {
       });
 
       res.status(200).json({
-        mensagem: 'Registro de afastamento atualizado e auditado com sucesso.',
+        mensagem: 'Registro de afastamento updated e auditado com sucesso.',
         afastamento: resultado
       });
 

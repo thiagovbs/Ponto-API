@@ -2,9 +2,10 @@ import { Request, Response } from 'express';
 import { prisma } from '../config/prisma';
 
 export const HorarioController = {
-  // 1. CRIAR JORNADA
-async criarHorario(req: Request, res: Response): Promise<void> {
+  // 1. CRIAR JORNADA (ISOLADA POR EMPRESA)
+  async criarHorario(req: Request, res: Response): Promise<void> {
     try {
+      const { empresaId } = req; // 🔒 Capturado com total segurança através do Token JWT pelo Middleware de Tenant
       const { 
         descricao, 
         tipoEscala, 
@@ -13,12 +14,17 @@ async criarHorario(req: Request, res: Response): Promise<void> {
         domingoInicioImpar,
         utilizaAlmocoAutomatico,
         duracaoAlmocoMinutos,
-        entradaAlternada, // 👈 Captura do payload do front
-        saidaAlternada    // 👈 Captura do payload do front
+        entradaAlternada, 
+        saidaAlternada    
       } = req.body;
 
       const administradorId = req.usuario?.id;
       const ip = req.ip || req.socket.remoteAddress;
+
+      if (!descricao) {
+        res.status(400).json({ erro: 'A descrição da jornada é obrigatória.' });
+        return;
+      }
 
       // Se for SEMANAL, busca do array. Se for ALTERNADA, assume as variáveis dedicadas
       let entradaFinal = "08:00";
@@ -41,22 +47,19 @@ async criarHorario(req: Request, res: Response): Promise<void> {
           data: {
             descricao,
             tipoEscala: tipoEscala || 'SEMANAL',
-            horaEntradaPadrao: entradaFinal, // 🔒 Grava o valor correto condicional
-            horaSaidaPadrao: saidaFinal,     // 🔒 Grava o valor correto condicional
-            
+            horaEntradaPadrao: entradaFinal, 
+            horaSaidaPadrao: saidaFinal,     
             utilizaAlmocoAutomatico: utilizaAlmocoAutomatico !== undefined ? utilizaAlmocoAutomatico : true,
             duracaoAlmocoMinutos: utilizaAlmocoAutomatico !== undefined ? Number(duracaoAlmocoMinutos) : 60,
-
             trabalhaSabado: tipoEscala === 'ALTERNADA' ? false : (regraSabado.trabalha || false),
             horaEntradaSabado: regraSabado.entrada,
             horaSaidaSabado: regraSabado.saida,
-            
             trabalhaDomingo: tipoEscala === 'ALTERNADA' ? false : (regraDomingo.trabalha || false),
             horaEntradaDomingo: regraDomingo.entrada,
             horaSaidaDomingo: regraDomingo.saida,
-            
             trabalhaDomingoAlt: trabalhaDomingoAlt || false,
-            domingoInicioImpar: domingoInicioImpar !== undefined ? domingoInicioImpar : true
+            domingoInicioImpar: domingoInicioImpar !== undefined ? domingoInicioImpar : true,
+            empresaId: empresaId! // 🔒 Vincula a nova jornada permanentemente ao Tenant ativo
           }
         }),
 
@@ -68,6 +71,7 @@ async criarHorario(req: Request, res: Response): Promise<void> {
             ipOrigem: ip || null,
             dadosAnteriores: {},
             dadosNovos: { 
+              empresaId, 
               descricao,
               escala: tipoEscala,
               horarioEfetivo: `${entradaFinal} - ${saidaFinal}`
@@ -83,10 +87,15 @@ async criarHorario(req: Request, res: Response): Promise<void> {
     }
   },
 
-  // 2. LISTAR JORNADAS
+  // 2. LISTAR JORNADAS (FILTRADO POR EMPRESA)
   async listarHorarios(req: Request, res: Response): Promise<void> {
     try {
+      const { empresaId } = req; // 🔒 Coletado via Token
+
       const horarios = await prisma.horario.findMany({
+        where: {
+          empresaId: empresaId // 🔒 Só exibe as escalas pertencentes a esta empresa!
+        },
         orderBy: { descricao: 'asc' }
       });
       res.status(200).json(horarios);
@@ -96,10 +105,11 @@ async criarHorario(req: Request, res: Response): Promise<void> {
     }
   }, 
 
-  // 3. ATUALIZAR JORNADA
+  // 3. ATUALIZAR JORNADA (VALIDANDO PROPRIEDADE CORPORATIVA)
   async atualizarHorario(req: Request, res: Response): Promise<void> {
     try {
       const { id } = req.params;
+      const { empresaId } = req; // 🔒 Coletado do Token
       const { 
         descricao, 
         tipoEscala, 
@@ -108,16 +118,23 @@ async criarHorario(req: Request, res: Response): Promise<void> {
         domingoInicioImpar,
         utilizaAlmocoAutomatico,
         duracaoAlmocoMinutos,
-        entradaAlternada, // 👈 Captura do payload do front
-        saidaAlternada    // 👈 Captura do payload do front
+        entradaAlternada, 
+        saidaAlternada    
       } = req.body;
 
       const administradorId = req.usuario?.id;
       const ip = req.ip || req.socket.remoteAddress;
 
-      const horarioExistente = await prisma.horario.findUnique({ where: { id } });
+      // 🔒 Valida rigorosamente se o Horário pertence a esta empresa antes de atualizar
+      const horarioExistente = await prisma.horario.findFirst({ 
+        where: { 
+          id: id,
+          empresaId: empresaId 
+        } 
+      });
+
       if (!horarioExistente) {
-        res.status(404).json({ erro: 'Jornada não encontrada.' });
+        res.status(404).json({ erro: 'Jornada não encontrada ou não pertence a esta organização.' });
         return;
       }
 
@@ -126,7 +143,6 @@ async criarHorario(req: Request, res: Response): Promise<void> {
       let saidaFinal = horarioExistente.horaSaidaPadrao;
 
       if (escalaAtual === 'ALTERNADA') {
-        // Se mudou ou informou novos horários de plantão, atualiza
         if (entradaAlternada) entradaFinal = entradaAlternada;
         if (saidaAlternada) saidaFinal = saidaAlternada;
       } else {
@@ -146,9 +162,8 @@ async criarHorario(req: Request, res: Response): Promise<void> {
           data: {
             descricao: descricao || horarioExistente.descricao,
             tipoEscala: escalaAtual,
-            horaEntradaPadrao: entradaFinal, // 🔒 Persiste a correção
-            horaSaidaPadrao: saidaFinal,     // 🔒 Persiste a correção
-            
+            horaEntradaPadrao: entradaFinal, 
+            horaSaidaPadrao: saidaFinal,     
             ...(escalaAtual !== 'ALTERNADA' && interrogadoSabado && {
               trabalhaSabado: interrogadoSabado.trabalha,
               horaEntradaSabado: interrogadoSabado.entrada,
@@ -159,7 +174,6 @@ async criarHorario(req: Request, res: Response): Promise<void> {
               horaEntradaDomingo: interrogadoDomingo.entrada,
               horaSaidaDomingo: interrogadoDomingo.saida
             }),
-            
             utilizaAlmocoAutomatico: utilizaAlmocoAutomatico !== undefined ? utilizaAlmocoAutomatico : horarioExistente.utilizaAlmocoAutomatico,
             duracaoAlmocoMinutos: duracaoAlmocoMinutos !== undefined ? Number(duracaoAlmocoMinutos) : horarioExistente.duracaoAlmocoMinutos,
             trabalhaDomingoAlt: trabalhaDomingoAlt !== undefined ? trabalhaDomingoAlt : horarioExistente.trabalhaDomingoAlt,
@@ -175,6 +189,7 @@ async criarHorario(req: Request, res: Response): Promise<void> {
             ipOrigem: ip || null,
             dadosAnteriores: horarioExistente as any,
             dadosNovos: { 
+              empresaId, // Registra o Tenant na trilha fiscal
               descricao: descricao || horarioExistente.descricao,
               utilizaAlmocoAutomatico,
               duracaoAlmocoMinutos,

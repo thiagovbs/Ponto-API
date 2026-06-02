@@ -1,5 +1,7 @@
 import 'dotenv/config';
 import express from 'express';
+import { tenantMiddleware } from './middlewares/tenant.middleware';
+import { superAdminRoutes } from './routes/superadmin.routes';
 import cors from 'cors';
 import { authRoutes } from './routes/auth.routes';
 import { pontoRoutes } from './routes/ponto.routes';
@@ -9,6 +11,8 @@ import { horarioRoutes } from './routes/horario.routes';
 import { auditoriaRoutes } from './routes/auditoria.routes';
 import { relatorioRoutes } from './routes/relatorio.routes';
 import { afastamentoRoutes } from './routes/afastamentos.routes';
+import { filialRoutes } from './routes/filial.routes'; 
+import { setorRoutes } from './routes/setor.routes';
 
 const app = express();
 
@@ -23,16 +27,21 @@ app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 // Rotas Públicas (Não exigem Token)
 app.use('/api/auth', authRoutes); // O login é público
-app.use('/api/ponto', pontoRoutes); // O ponto também é público (pois o tablet da portaria não tem sessão fixa)
-app.use('/api/usuarios', usuarioRoutes);
+
+app.use('/api/super', AuthMiddleware.verificarToken, superAdminRoutes);
 
 // Rotas Protegidas
 // Aqui aplicamos a proteção: exige Token E exige ser Admin
 
+app.use(tenantMiddleware);
+app.use('/api/ponto', pontoRoutes);
+app.use('/api/usuarios', usuarioRoutes);
 app.use('/api/horarios', AuthMiddleware.verificarToken, AuthMiddleware.verificarAdmin, horarioRoutes);
 app.use('/api/auditoria', AuthMiddleware.verificarToken, AuthMiddleware.verificarAdmin, auditoriaRoutes);
 app.use('/api/relatorios', AuthMiddleware.verificarToken, AuthMiddleware.verificarAdmin, relatorioRoutes);
 app.use('/api/afastamentos', AuthMiddleware.verificarToken, AuthMiddleware.verificarAdmin, afastamentoRoutes);
+app.use('/api/filiais', AuthMiddleware.verificarToken, AuthMiddleware.verificarAdmin, filialRoutes);
+app.use('/api/setores', AuthMiddleware.verificarToken, AuthMiddleware.verificarAdmin, setorRoutes);
 
 const PORT = process.env.PORT || 3003;
 

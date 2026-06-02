@@ -3,7 +3,6 @@ import { prisma } from '../config/prisma';
 import HTMLPDF from 'html-pdf-node';
 import { gerarConteudoAEF } from '../services/aef.service';
 
-// Funções auxiliares para cálculo de horas
 const transformarEmMinutos = (horarioStr: string): number => {
   if (!horarioStr) return 0;
   const [horas, minutos] = horarioStr.split(':').map(Number);
@@ -19,19 +18,20 @@ const formatarMinutosParaHoras = (minutosTotais: number): string => {
 };
 
 export const RelatorioController = {
-  // 1. DASHBOARD GERAL (Rota: GET /api/relatorios/dashboard)
   async dashboardGeral(req: Request, res: Response): Promise<void> {
     try {
+      const { empresaId } = req;
       const hoje = new Date();
       const dataInicio = new Date(hoje.getFullYear(), hoje.getMonth(), hoje.getDate(), 0, 0, 0);
       const dataFim = new Date(hoje.getFullYear(), hoje.getMonth(), hoje.getDate(), 23, 59, 59);
 
       const [totalFuncionarios, batidasHoje, feedAtividades] = await prisma.$transaction([
         prisma.usuario.count({
-          where: { perfil: 'FUNCIONARIO' }
+          where: { perfil: 'FUNCIONARIO', empresaId: empresaId }
         }),
         prisma.batidaPonto.count({
           where: {
+            empresaId: empresaId,
             dataHora: {
               gte: dataInicio,
               lte: dataFim
@@ -40,6 +40,7 @@ export const RelatorioController = {
         }),
         prisma.batidaPonto.findMany({
           where: {
+            empresaId: empresaId,
             dataHora: {
               gte: dataInicio,
               lte: dataFim
@@ -72,19 +73,19 @@ export const RelatorioController = {
     }
   },
 
-  // 2. EMISSÃO DO ESPELHO DE PONTO EM JSON (Rota: GET /api/relatorios/funcionario/:usuarioId)
   async relatorioMensalPorFuncionario(req: Request, res: Response): Promise<void> {
     try {
       const { usuarioId } = req.params;
       const { mes, ano } = req.query;
+      const { empresaId } = req;
 
       if (!usuarioId || !mes || !ano) {
         res.status(400).json({ erro: 'Os parâmetros usuarioId, mes e ano são obrigatórios.' });
         return;
       }
 
-      const usuario = await prisma.usuario.findUnique({
-        where: { id: usuarioId },
+      const usuario = await prisma.usuario.findFirst({
+        where: { id: usuarioId, empresaId: empresaId },
         include: { Horario: true, afastamentos: true }
       });
 
@@ -102,6 +103,7 @@ export const RelatorioController = {
       const todasBatidas = await prisma.batidaPonto.findMany({
         where: {
           usuarioId,
+          empresaId: empresaId,
           dataHora: {
             gte: dataInicio,
             lte: dataFim
@@ -128,7 +130,6 @@ export const RelatorioController = {
         
         const diaSemanaNum = dataCorrente.getDay();
 
-        // 🏝️ 1. VALIDAÇÃO DE REGIME DE AFASTAMENTO/FÉRIAS ANTES DE QUALQUER CÁLCULO
         const afastamentoDoDia = usuario?.afastamentos?.find((af) => {
           const inicio = new Date(af.dataInicio);
           const fim = new Date(af.dataFim);
@@ -179,12 +180,10 @@ export const RelatorioController = {
               trabalhaNoDia = true; 
               entradaEsperadaStr = (h as any).horaEntradaSabado || h.horaEntradaPadrao; 
               saidaEsperadaStr = (h as any).horaSaidaSabado || h.horaSaidaPadrao; 
-            } else if (diaSemanaNum === 0) {
-              if (h.domingoInicioImpar || (h as any).trabalhaDomingo) {
-                trabalhaNoDia = true; 
-                entradaEsperadaStr = (h as any).horaEntradaDomingo || h.horaEntradaPadrao; 
-                saidaEsperadaStr = (h as any).horaSaidaDomingo || h.horaSaidaPadrao;
-              }
+            } else if (diaSemanaNum === 0 && (h as any).trabalhaDomingo) {
+              trabalhaNoDia = true; 
+              entradaEsperadaStr = (h as any).horaEntradaDomingo || h.horaEntradaPadrao; 
+              saidaEsperadaStr = (h as any).horaSaidaDomingo || h.horaSaidaPadrao;
             }
           } else if (h.tipoEscala === 'ALTERNADA') {
             const dataReferenciaUsuario = usuario.dataInicioEscala 
@@ -329,20 +328,20 @@ export const RelatorioController = {
     }
   },
   
-  // 3. GENERATION DO PDF OFICIAL EM PÁGINA ÚNICA (Rota: GET /api/relatorios/funcionario/:usuarioId/imprimir)
   async emitirPDFEspelho(req: Request, res: Response): Promise<void> {
     try {
       const { usuarioId } = req.params;
       const { mes, ano } = req.query;
+      const { empresaId } = req;
 
       if (!usuarioId || !mes || !ano) {
         res.status(400).json({ erro: 'Parâmetros insuficientes para geração do documento.' });
         return;
       }
 
-      const usuario = await prisma.usuario.findUnique({
-        where: { id: usuarioId },
-        include: { Horario: true, afastamentos: true }
+      const usuario = await prisma.usuario.findFirst({
+        where: { id: usuarioId, empresaId: empresaId },
+        include: { Horario: true, afastamentos: true, empresa: true }
       });
 
       if (!usuario) {
@@ -359,6 +358,7 @@ export const RelatorioController = {
       const todasBatidas = await prisma.batidaPonto.findMany({
         where: {
           usuarioId,
+          empresaId: empresaId,
           dataHora: {
             gte: dataInicio,
             lte: dataFim
@@ -385,7 +385,6 @@ export const RelatorioController = {
         
         const diaSemanaNum = dataCorrente.getDay();
 
-        // 🏝️ 1. VALIDAÇÃO DE REGIME DE AFASTAMENTO/FÉRIAS PARA O IMPRESSO
         const afastamentoDoDia = usuario?.afastamentos?.find((af) => {
           const inicio = new Date(af.dataInicio);
           const fim = new Date(af.dataFim);
@@ -436,12 +435,10 @@ export const RelatorioController = {
               trabalhaNoDia = true; 
               entradaEsperadaStr = (h as any).horaEntradaSabado || h.horaEntradaPadrao; 
               saidaEsperadaStr = (h as any).horaSaidaSabado || h.horaSaidaPadrao; 
-            } else if (diaSemanaNum === 0) {
-              if (h.domingoInicioImpar || (h as any).trabalhaDomingo) {
-                trabalhaNoDia = true; 
-                entradaEsperadaStr = (h as any).horaEntradaDomingo || h.horaEntradaPadrao; 
-                saidaEsperadaStr = (h as any).horaSaidaDomingo || h.horaSaidaPadrao;
-              }
+            } else if (diaSemanaNum === 0 && (h as any).trabalhaDomingo) {
+              trabalhaNoDia = true; 
+              entradaEsperadaStr = (h as any).horaEntradaDomingo || h.horaEntradaPadrao; 
+              saidaEsperadaStr = (h as any).horaSaidaDomingo || h.horaSaidaPadrao;
             }
           } else if (h.tipoEscala === 'ALTERNADA') {
             const dataReferenciaUsuario = usuario.dataInicioEscala 
@@ -630,6 +627,10 @@ export const RelatorioController = {
             <div class="title">Espelho de Ponto Eletrônico</div>
             <table style="width:100%; border:none; margin:0; font-size: 8.5pt;">
               <tr style="border:none;">
+                <td style="border:none; padding:1px;"><strong>Empregador:</strong> ${usuario.empresa?.razaoSocial}</td>
+                <td style="border:none; padding:1px; text-align:right;"><strong>CNPJ:</strong> ${usuario.empresa?.cnpj}</td>
+              </tr>
+              <tr style="border:none;">
                 <td style="border:none; padding:1px;"><strong>Funcionário:</strong> ${usuario.nome}</td>
                 <td style="border:none; padding:1px; text-align:right;"><strong>Período de Referência:</strong> ${String(mesInt).padStart(2, '0')}/${anoInt}</td>
               </tr>
@@ -697,28 +698,33 @@ export const RelatorioController = {
       res.status(500).json({ erro: 'Falha crítica ao renderizar arquivo de impressão do espelho.' });
     }
   },
+
   async downloadAEF(req: Request, res: Response): Promise<void> {
     try {
       const { dataInicio, dataFim } = req.query;
+      const { empresaId } = req;
 
       if (!dataInicio || !dataFim) {
         res.status(400).json({ erro: 'As datas de início e fim são obrigatórias para a extração fiscal.' });
         return;
       }
 
-      // Parâmetros fixos da organização empregadora (Podem ser extraídos de variáveis de ambiente futuramente)
-      const CNPJ_EMPRESA = "12345678000199"; 
-      const RAZAO_SOCIAL = "SRO PONTO AUTOMACAO LTDA";
+      const empresa = await prisma.empresa.findUnique({
+        where: { id: empresaId }
+      });
 
-      // Dispara a rotina utilitária que converte os dados do Prisma em colunas de tamanho fixo txt
+      if (!empresa) {
+        res.status(404).json({ erro: 'Empresa contratante não localizada.' });
+        return;
+      }
+
       const conteudoTxt = await gerarConteudoAEF(
         new Date(String(dataInicio)),
         new Date(String(dataFim)),
-        CNPJ_EMPRESA,
-        RAZAO_SOCIAL
+        empresa.cnpj,
+        empresa.razaoSocial
       );
 
-      // Injeta os headers HTTP adequados para forçar o download de arquivo de texto puro
       res.setHeader('Content-Type', 'text/plain; charset=utf-8');
       res.setHeader('Content-Disposition', 'attachment; filename=AEF_Portaria671.txt');
       
@@ -728,6 +734,4 @@ export const RelatorioController = {
       res.status(500).json({ erro: 'Falha crítica ao compilar e estruturar o arquivo fiscal AEF.' });
     }
   }
-
-
 };

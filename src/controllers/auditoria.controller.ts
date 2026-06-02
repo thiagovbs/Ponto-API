@@ -4,6 +4,8 @@ import { prisma } from '../config/prisma';
 export const AuditoriaController = {
   async listarLogs(req: Request, res: Response): Promise<void> {
     try {
+      const { empresaId } = req; // 🔒 Injetado dinamicamente pelo seu Middleware de Tenant
+
       // 1. Captura e trata os parâmetros enviados pelo Vue.js
       const pagina = parseInt(req.query.pagina as string) || 1;
       const limite = parseInt(req.query.limite as string) || 20;
@@ -14,7 +16,12 @@ export const AuditoriaController = {
       const pular = (pagina - 1) * limite;
 
       // 2. Monta as condições dinâmicas do WHERE (Filtros)
-      const whereClause: any = {};
+      // 🔒 ISOLAMENTO DE DADOS: Restringe as ações apenas a usuários desta empresa
+      const whereClause: any = {
+        usuarioAcao: {
+          empresaId: empresaId // Garante que só trará logs gerados por membros desta empresa
+        }
+      };
 
       // Filtro por período de datas
       if (dataInicio || dataFim) {
@@ -31,12 +38,13 @@ export const AuditoriaController = {
 
       // Filtro por termo de busca (Procura na Ação, Entidade ou no nome do Usuário)
       if (busca) {
-        whereClause.OR = [
+        whereClause.AND = [
           { acao: { contains: busca, mode: 'insensitive' } },
           { entidade: { contains: busca, mode: 'insensitive' } },
           {
             usuarioAcao: {
-              nome: { contains: busca, mode: 'insensitive' }
+              nome: { contains: busca, mode: 'insensitive' },
+              empresaId: empresaId // Reafirma o isolamento de segurança na busca aninhada
             }
           }
         ];
@@ -56,7 +64,8 @@ export const AuditoriaController = {
             usuarioAcao: {
               select: {
                 nome: true,
-                cpf: true
+                cpf: true,
+                empresaId: true // Retorna o ID para auditoria visual se necessário
               }
             }
           }

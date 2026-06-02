@@ -1,14 +1,11 @@
 import { Request, Response } from 'express';
 import { prisma } from '../config/prisma';
 
-// Função auxiliar para forçar a criação de um objeto Date puramente em formato UTC neutro
 const criarDataUTCLiteral = (ano: number, mes: number, dia: number, horas: number, minutos: number): Date => {
-  // O Date.UTC retorna o timestamp Unix em milissegundos correspondente ao fuso neutro (Z)
   return new Date(Date.UTC(ano, mes - 1, dia, horas, minutos, 0, 0));
 };
 
 export const PontoController = {
-  // 1. REGISTRAR PONTO (MOBILE/PRODUÇÃO)
   async registrarPonto(req: Request, res: Response): Promise<void> {
     try {
       const { usuarioId, fotoBase64, latitude, longitude, dataHora } = req.body;
@@ -34,7 +31,6 @@ export const PontoController = {
         return;
       }
 
-      // 🔒 CORREÇÃO TIMEZONE MOBILE: Garante que a string termine com 'Z' (UTC Puro) antes do construtor
       const dataHoraTratada = dataHora.endsWith('Z') ? dataHora : `${dataHora}Z`;
       const dataFinalPonto = new Date(dataHoraTratada);
 
@@ -46,6 +42,8 @@ export const PontoController = {
             latitude,
             longitude,
             dataHora: dataFinalPonto,
+            empresaId: usuario.empresaId,
+            setorId: usuario.setorId
           },
         }),
         prisma.logAuditoria.create({
@@ -56,6 +54,8 @@ export const PontoController = {
             ipOrigem: ip || null,
             dadosAnteriores: {},
             dadosNovos: {
+              empresaId: usuario.empresaId,
+              setorId: usuario.setorId,
               usuarioNome: usuario.nome,
               cpf: usuario.cpf,
               latitude,
@@ -80,10 +80,14 @@ export const PontoController = {
     }
   },
 
-  // 2. LISTAR BATIDAS BRUTAS
   async listarBatidas(req: Request, res: Response): Promise<void> {
     try {
+      const { empresaId } = req;
+
       const batidas = await prisma.batidaPonto.findMany({
+        where: {
+          empresaId: empresaId
+        },
         select: {
           id: true,
           dataHora: true,
@@ -108,10 +112,10 @@ export const PontoController = {
     }
   },
 
-  // 3. AJUSTAR/ALTERAR MARCAÇÃO EXISTENTE (SINCRO WEB BLINDADA)
   async ajustarBatidaPonto(req: Request, res: Response): Promise<void> {
     try {
       const { batidaId } = req.params;
+      const { empresaId } = req;
       const { novaHora, novaData, justificativa } = req.body;
       const quemAlterouId = req.usuario?.id; 
       const ip = req.ip || req.socket.remoteAddress;
@@ -121,8 +125,8 @@ export const PontoController = {
         return;
       }
 
-      const batidaOriginal = await prisma.batidaPonto.findUnique({
-        where: { id: batidaId },
+      const batidaOriginal = await prisma.batidaPonto.findFirst({
+        where: { id: batidaId, empresaId: empresaId },
         include: { 
           usuario: { select: { nome: true, cpf: true } },
           modificacoes: { orderBy: { createdAt: 'desc' }, take: 1 } 
@@ -143,10 +147,8 @@ export const PontoController = {
 
       if (novaData) {
         const [ano, mes, dia] = novaData.split('-').map(Number);
-        // 🔒 CORREÇÃO TIMEZONE WEB AJUSTE: Força a criação literal em fuso neutro
         novaDataHoraEfetiva = criarDataUTCLiteral(ano, mes, dia, horas, minutos);
       } else {
-        // Se manteve a mesma data, extraímos os componentes UTC do registro de referência
         const ano = dataHoraAnteriorDeReferencia.getUTCFullYear();
         const mes = dataHoraAnteriorDeReferencia.getUTCMonth() + 1;
         const dia = dataHoraAnteriorDeReferencia.getUTCDate();
@@ -171,6 +173,7 @@ export const PontoController = {
             ipOrigem: ip || null,
             dadosAnteriores: {
               batidaId,
+              empresaId,
               funcionario: batidaOriginal.usuario.nome,
               horarioAnterior: dataHoraAnteriorDeReferencia.toISOString()
             },
@@ -194,9 +197,9 @@ export const PontoController = {
     }
   },
 
-  // 4. INCLUSÃO MANUAL DO ZERO (SINCRO WEB BLINDADA)
   async incluirPontoManualmente(req: Request, res: Response): Promise<void> {
     try {
+      const { empresaId } = req;
       const { usuarioId, dataDia, hora, justificativa } = req.body;
       const quemAlterouId = req.usuario?.id;
       const ip = req.ip || req.socket.remoteAddress;
@@ -206,7 +209,7 @@ export const PontoController = {
         return;
       }
 
-      const usuario = await prisma.usuario.findUnique({ where: { id: usuarioId } });
+      const usuario = await prisma.usuario.findFirst({ where: { id: usuarioId, empresaId: empresaId } });
       if (!usuario) {
         res.status(404).json({ erro: 'Funcionário não encontrado' });
         return;
@@ -215,7 +218,6 @@ export const PontoController = {
       const [ano, mes, dia] = dataDia.split('-').map(Number);
       const [horas, minutos] = hora.split(':').map(Number);
       
-      // 🔒 CORREÇÃO TIMEZONE WEB INCLUSÃO: Substituído o construtor local pelo criador UTC literal
       const novaDataHoraEfetiva = criarDataUTCLiteral(ano, mes, dia, horas, minutos);
 
       const resultado = await prisma.$transaction(async (tx) => {
@@ -225,7 +227,9 @@ export const PontoController = {
             dataHora: novaDataHoraEfetiva,
             fotoBase64: "INCLUSAO_MANUAL_ADMIN", 
             latitude: 0,
-            longitude: 0
+            longitude: 0,
+            empresaId: empresaId!,
+            setorId: usuario.setorId
           }
         });
 
@@ -247,6 +251,7 @@ export const PontoController = {
             ipOrigem: ip || null,
             dadosAnteriores: {},
             dadosNovos: {
+              empresaId,
               usuarioNome: usuario.nome,
               cpf: usuario.cpf,
               horarioIncluido: novaDataHoraEfetiva.toISOString(),
@@ -270,10 +275,10 @@ export const PontoController = {
     }
   },
 
-  // 5. DESCONSIDERAR MARCAÇÃO/DELEÇÃO LÓGICA
   async desconsiderarBatidaPonto(req: Request, res: Response): Promise<void> {
     try {
       const { batidaId } = req.params;
+      const { empresaId } = req;
       const { justificativa } = req.body;
       const quemAlterouId = req.usuario?.id; 
       const ip = req.ip || req.socket.remoteAddress;
@@ -283,8 +288,8 @@ export const PontoController = {
         return;
       }
 
-      const batidaOriginal = await prisma.batidaPonto.findUnique({
-        where: { id: batidaId },
+      const batidaOriginal = await prisma.batidaPonto.findFirst({
+        where: { id: batidaId, empresaId: empresaId },
         include: { 
           usuario: { select: { nome: true, cpf: true } },
           modificacoes: { orderBy: { createdAt: 'desc' }, take: 1 } 
@@ -318,6 +323,7 @@ export const PontoController = {
             ipOrigem: ip || null,
             dadosAnteriores: {
               batidaId,
+              empresaId,
               funcionario: batidaOriginal.usuario.nome,
               horarioQueSumiu: dataHoraAnterior.toISOString()
             },
