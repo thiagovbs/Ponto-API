@@ -420,7 +420,7 @@ export const RelatorioController = {
 
         batidasDoDia.sort((a, b) => (a as any).dataCalculoReal.getTime() - (b as any).dataCalculoReal.getTime());
 
-        let trabajaNoDia = false;
+        let trabalhaNoDia = false;
         let entradaEsperadaStr = '';
         let saidaEsperadaStr = '';
 
