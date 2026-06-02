@@ -14,7 +14,13 @@ export const PontoController = {
       const { usuarioId, fotoBase64, latitude, longitude, dataHora } = req.body;
       const ip = req.ip || req.socket.remoteAddress;
 
-      if (!usuarioId || !fotoBase64 || !latitude || !longitude || !dataHora) {
+      if (
+        !usuarioId || 
+        !fotoBase64 || 
+        !dataHora || 
+        latitude === undefined || latitude === null || 
+        longitude === undefined || longitude === null
+      ) {
         res.status(400).json({ erro: 'Todos os campos são obrigatórios' });
         return;
       }
