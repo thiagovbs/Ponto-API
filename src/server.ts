@@ -16,17 +16,17 @@ import { setorRoutes } from './routes/setor.routes';
 
 const app = express();
 
-// 🟢 CONFIGURAÇÃO DE CORS CORRIGIDA: Adicionado 'x-totem-token' aos cabeçalhos permitidos para liberar as chamadas complexas do Totem
+// CONFIGURAÇÃO DE CORS: Autorização explícita para o x-totem-token do Flutter
 app.use(cors({
   origin: '*', 
   methods: ['GET', 'POST', 'PUT', 'DELETE'],
   allowedHeaders: ['Content-Type', 'Authorization', 'x-totem-token']
 }));
 
-app.use(express.json({ limit: '50mb' }));
-app.use(express.urlencoded({ limit: '50mb', extended: true }));
+app.use(express.json({ limit: '50mb' })); //
+app.use(express.urlencoded({ limit: '50mb', extended: true })); //
 
-// 🟢 ROTA DE PING / HEALTH CHECK: Declarada antes de qualquer middleware para ser 100% pública e leve
+// ROTA DE PING / HEALTH CHECK: Mantida pública e estável
 app.get('/ping', (req, res) => {
   res.status(200).json({ 
     status: "online",
@@ -38,23 +38,22 @@ app.get('/ping', (req, res) => {
 // Rotas Públicas (Não exigem Token)
 app.use('/api/auth', authRoutes); // O login é público
 
-app.use('/api/super', AuthMiddleware.verificarToken, superAdminRoutes);
+app.use('/api/super', AuthMiddleware.verificarToken, superAdminRoutes); //
 
-// Rotas Protegidas
-// Aqui aplicamos a proteção: exige Token E exige ser Admin
+// Rotas Protegidas - Aplicadas sob o ecossistema linear multi-tenant nativo
+app.use(tenantMiddleware); // Agora o tenantMiddleware gerencia com maestria tanto JWT quanto Totem Token!
 
-app.use(tenantMiddleware);
-app.use('/api/ponto', pontoRoutes);
-app.use('/api/usuarios', usuarioRoutes);
-app.use('/api/horarios', AuthMiddleware.verificarToken, AuthMiddleware.verificarAdmin, horarioRoutes);
-app.use('/api/auditoria', AuthMiddleware.verificarToken, AuthMiddleware.verificarAdmin, auditoriaRoutes);
-app.use('/api/relatorios', AuthMiddleware.verificarToken, AuthMiddleware.verificarAdmin, relatorioRoutes);
-app.use('/api/afastamentos', AuthMiddleware.verificarToken, AuthMiddleware.verificarAdmin, afastamentoRoutes);
-app.use('/api/filiais', AuthMiddleware.verificarToken, AuthMiddleware.verificarAdmin, filialRoutes);
-app.use('/api/setores', AuthMiddleware.verificarToken, AuthMiddleware.verificarAdmin, setorRoutes);
+app.use('/api/ponto', pontoRoutes); //
+app.use('/api/usuarios', usuarioRoutes); //
+app.use('/api/horarios', AuthMiddleware.verificarToken, AuthMiddleware.verificarAdmin, horarioRoutes); //
+app.use('/api/auditoria', AuthMiddleware.verificarToken, AuthMiddleware.verificarAdmin, auditoriaRoutes); //
+app.use('/api/relatorios', AuthMiddleware.verificarToken, AuthMiddleware.verificarAdmin, relatorioRoutes); //
+app.use('/api/afastamentos', AuthMiddleware.verificarToken, AuthMiddleware.verificarAdmin, afastamentoRoutes); //
+app.use('/api/filiais', AuthMiddleware.verificarToken, AuthMiddleware.verificarAdmin, filialRoutes); //
+app.use('/api/setores', AuthMiddleware.verificarToken, AuthMiddleware.verificarAdmin, setorRoutes); //
 
-const PORT = process.env.PORT || 3003;
+const PORT = process.env.PORT || 3003; //
 
 app.listen(PORT, () => {
-  console.log(`🚀 Servidor rodando na porta ${PORT}`);
+  console.log(`🚀 Servidor rodando na porta ${PORT}`); //
 });

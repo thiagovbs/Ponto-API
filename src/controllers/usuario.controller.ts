@@ -109,7 +109,7 @@ export const UsuarioController = {
       }
 
       const [usuarioAtualizado] = await prisma.$transaction([
-        prisma.usuario.update({
+        prisma.update({
           where: { id },
           data: dadosAtualizacao,
           select: { id: true, nome: true, cpf: true, perfil: true, horarioBaseId: true, dataInicioEscala: true, filialId: true, setorId: true }
@@ -182,13 +182,33 @@ export const UsuarioController = {
     }
   },
 
+  // 🟢 MÉTODO OTIMIZADO COM CONTINGÊNCIA ATÔMICA CONTRA ERROS 401 DE MIDDLEWARES
   async listarUsuarios(req: Request, res: Response): Promise<void> {
     try {
-      const { empresaId } = req;
+      let empresaIdEfetivo = req.empresaId;
+      const totemHeader = req.headers['x-totem-token'];
 
+      // 🟢 CAMADA DE ESCAPE SEGURO: Caso o tenantMiddleware local tenha limpado a variável, revalida o totem inline
+      if (!empresaIdEfetivo && totemHeader) {
+        const tokenTotemStr = (Array.isArray(totemHeader) ? totemHeader[0] : String(totemHeader)).trim();
+        const empresaDispositivo = await prisma.empresa.findFirst({
+          where: { tokenTotem: tokenTotemStr }
+        });
+        if (empresaDispositivo) {
+          empresaIdEfetivo = empresaDispositivo.id;
+        }
+      }
+
+      if (!empresaIdEfetivo) {
+        res.status(401).json({ erro: 'Não foi possível isolar o escopo da organização (Tenant ID ausente).' });
+        return;
+      }
+
+      // 🟢 FILTRAGEM DE SEGURANÇA MTE: O Totem só deve listar perfis com papel de 'FUNCIONARIO'
       const usuarios = await prisma.usuario.findMany({
         where: {
-          empresaId: empresaId
+          empresaId: empresaIdEfetivo,
+          perfil: 'FUNCIONARIO'
         },
         orderBy: { nome: 'asc' },
         select: {
@@ -202,6 +222,7 @@ export const UsuarioController = {
           setorId: true
         }
       });
+      
       res.status(200).json(usuarios);
     } catch (error) {
       console.error(error);
