@@ -61,10 +61,12 @@ export const SuperAdminController = {
         });
 
         // Cria um Setor Padrão automaticamente
+        // 🟢 CORREÇÃO: Injetado o 'empresaId' exigido pelas relações do Prisma Schema
         const setorPadrao = await tx.setor.create({
           data: {
             nome: 'Administração Geral',
-            filialId: filialPadrao.id
+            filialId: filialPadrao.id,
+            empresaId: novaEmpresa.id
           }
         });
 
@@ -136,7 +138,7 @@ export const SuperAdminController = {
         data: { ativo }
       });
 
-      res.status(200).json({ mensagem: 'Status organizacional atualizado com sucesso!' });
+      res.status(200).json({ mensagem: 'Status organizacional updated com sucesso!' });
     } catch (error: any) {
       console.error('Erro ao atualizar empresa:', error);
       res.status(500).json({ erro: 'Erro interno ao modificar cadastro do cliente.' });
