@@ -155,7 +155,7 @@ export const PontoController = {
         const ano = dataHoraAnteriorDeReferencia.getUTCFullYear();
         const mes = dataHoraAnteriorDeReferencia.getUTCMonth() + 1;
         const dia = dataHoraAnteriorDeReferencia.getUTCDate();
-        novaDataHoraEfetiva = criarDataUTCLiteral(ano, mes, dia, horas, minutes);
+        novaDataHoraEfetiva = criarDataUTCLiteral(ano, mes, dia, horas, minutos);
       }
 
       const [logHistorico] = await prisma.$transaction([
