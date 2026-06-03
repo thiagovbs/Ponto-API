@@ -15,6 +15,7 @@ model Empresa {
   razaoSocial  String        @map("razao_social")
   cnpj         String        @unique
   tokenTotem   String        @unique @default(uuid()) @map("token_totem") // Hash usado para autenticar o tablet da portaria
+  ativo        Boolean       @default(true)
   createdAt    DateTime      @default(now()) @map("created_at")
   updatedAt    DateTime      @updatedAt @map("updated_at")
   
