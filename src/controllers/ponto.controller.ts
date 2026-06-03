@@ -6,6 +6,7 @@ const criarDataUTCLiteral = (ano: number, mes: number, dia: number, horas: numbe
 };
 
 export const PontoController = {
+  // ⏱️ REGISTRAR PONTO ELETRÔNICO (MOBILE TOTEM)
   async registrarPonto(req: Request, res: Response): Promise<void> {
     try {
       const { usuarioId, fotoBase64, latitude, longitude, dataHora } = req.body;
@@ -61,7 +62,7 @@ export const PontoController = {
               latitude,
               longitude,
               dataHora: dataFinalPonto.toISOString(),
-              info: "Marcação de ponto efetuada via Mobile."
+              info: "Marcação de ponto efetuada via Mobile Totem App."
             }
           }
         })
@@ -80,6 +81,7 @@ export const PontoController = {
     }
   },
 
+  // 📋 LISTAR TODAS AS BATIDAS DA ORGANIZAÇÃO (TENANT)
   async listarBatidas(req: Request, res: Response): Promise<void> {
     try {
       const { empresaId } = req;
@@ -112,6 +114,7 @@ export const PontoController = {
     }
   },
 
+  // 📝 AJUSTAR HORÁRIO DE MARCAÇÃO EXISTENTE (PORTARIA 671 MTE)
   async ajustarBatidaPonto(req: Request, res: Response): Promise<void> {
     try {
       const { batidaId } = req.params;
@@ -152,7 +155,7 @@ export const PontoController = {
         const ano = dataHoraAnteriorDeReferencia.getUTCFullYear();
         const mes = dataHoraAnteriorDeReferencia.getUTCMonth() + 1;
         const dia = dataHoraAnteriorDeReferencia.getUTCDate();
-        novaDataHoraEfetiva = criarDataUTCLiteral(ano, mes, dia, horas, minutos);
+        novaDataHoraEfetiva = criarDataUTCLiteral(ano, mes, dia, horas, minutes);
       }
 
       const [logHistorico] = await prisma.$transaction([
@@ -180,7 +183,7 @@ export const PontoController = {
             dadosNovos: {
               horarioNovo: novaDataHoraEfetiva.toISOString(),
               justificativa,
-              info: "Ajuste manual de horário efetuado via Painel Administrativo."
+              info: "Ajuste manual de horário efetuado via Painel Administrativo Web."
             }
           }
         })
@@ -197,6 +200,7 @@ export const PontoController = {
     }
   },
 
+  // ➕ INCLUIR MARCAÇÃO DE PONTO MANUAL AVULSA
   async incluirPontoManualmente(req: Request, res: Response): Promise<void> {
     try {
       const { empresaId } = req;
@@ -275,6 +279,7 @@ export const PontoController = {
     }
   },
 
+  // 🚫 DESCONSIDERAR MARCAÇÃO LOGICAMENTE (DEDUÇÃO FISCAL)
   async desconsiderarBatidaPonto(req: Request, res: Response): Promise<void> {
     try {
       const { batidaId } = req.params;
