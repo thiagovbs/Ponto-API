@@ -108,8 +108,9 @@ export const UsuarioController = {
         dadosAtualizacao.senhaHash = await bcrypt.hash(senha, salt);
       }
 
+      // 🟢 FIXADO: Corrigido o acesso ao modelo adicionando 'prisma.usuario.update' para sanar o erro TS2339
       const [usuarioAtualizado] = await prisma.$transaction([
-        prisma.update({
+        prisma.usuario.update({
           where: { id },
           data: dadosAtualizacao,
           select: { id: true, nome: true, cpf: true, perfil: true, horarioBaseId: true, dataInicioEscala: true, filialId: true, setorId: true }
@@ -182,13 +183,12 @@ export const UsuarioController = {
     }
   },
 
-  // 🟢 MÉTODO OTIMIZADO COM CONTINGÊNCIA ATÔMICA CONTRA ERROS 401 DE MIDDLEWARES
   async listarUsuarios(req: Request, res: Response): Promise<void> {
     try {
       let empresaIdEfetivo = req.empresaId;
       const totemHeader = req.headers['x-totem-token'];
 
-      // 🟢 CAMADA DE ESCAPE SEGURO: Caso o tenantMiddleware local tenha limpado a variável, revalida o totem inline
+      // Camada de escape seguro para revalidação inline do token do totem
       if (!empresaIdEfetivo && totemHeader) {
         const tokenTotemStr = (Array.isArray(totemHeader) ? totemHeader[0] : String(totemHeader)).trim();
         const empresaDispositivo = await prisma.empresa.findFirst({
@@ -204,7 +204,7 @@ export const UsuarioController = {
         return;
       }
 
-      // 🟢 FILTRAGEM DE SEGURANÇA MTE: O Totem só deve listar perfis com papel de 'FUNCIONARIO'
+      // Filtragem de segurança MTE para o Totem listar apenas perfis de colaboradores funcionais
       const usuarios = await prisma.usuario.findMany({
         where: {
           empresaId: empresaIdEfetivo,
