@@ -26,6 +26,15 @@ app.use(cors({
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
+// 🟢 ROTA DE PING / HEALTH CHECK: Declarada antes de qualquer middleware para ser 100% pública e leve
+app.get('/ping', (req, res) => {
+  res.status(200).json({ 
+    status: "online",
+    message: "pong",
+    timestamp: new Date().toISOString()
+  });
+});
+
 // Rotas Públicas (Não exigem Token)
 app.use('/api/auth', authRoutes); // O login é público
 
