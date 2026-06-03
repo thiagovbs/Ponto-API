@@ -61,7 +61,7 @@ export const RelatorioController = {
         feedAtividades: feedAtividades.map(f => ({
           id: f.id,
           nome: f.usuario.nome,
-          hora: f.dataHora.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' }),
+          hour: f.dataHora.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' }),
           foto: f.fotoBase64,
           latitude: f.latitude,
           longitude: f.longitude
@@ -165,6 +165,11 @@ export const RelatorioController = {
 
         batidasDoDia.sort((a, b) => (a as any).dataCalculoReal.getTime() - (b as any).dataCalculoReal.getTime());
 
+        // 🟢 REGRA FISCAL DE AUDITORIA: Filtra apenas as batidas válidas que NÃO foram desconsideradas
+        const batidasValidasParaCalculo = batidasDoDia.filter(b => {
+          return !(b.modificacoes && b.modificacoes.length > 0 && b.modificacoes[0].dataHoraNova.getTime() === 0);
+        });
+
         let trabalhaNoDia = false;
         let entradaEsperadaStr = '';
         let saidaEsperadaStr = '';
@@ -210,41 +215,39 @@ export const RelatorioController = {
 
         if (trabalhaNoDia) {
           status = 'FALTA';
-          if (batidasDoDia.length > 0) {
-            const bPrimeira = batidasDoDia[0];
-            if (bPrimeira.modificacoes && bPrimeira.modificacoes.length > 0 && bPrimeira.modificacoes[0].dataHoraNova.getTime() === 0) {
+          if (batidasValidasParaCalculo.length > 0) {
+            status = 'TRABALHADO';
+            for (let i = 0; i < batidasValidasParaCalculo.length; i += 2) {
+              if (i + 1 < batidasValidasParaCalculo.length) {
+                const entradaMinutos = transformarEmMinutos((batidasValidasParaCalculo[i] as any).dataCalculoReal.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' }));
+                const saidaMinutos = transformarEmMinutos((batidasValidasParaCalculo[i+1] as any).dataCalculoReal.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' }));
+                minutosTrabalhadosNoDia += (saidaMinutos - entradaMinutos);
+              }
+            }
+
+            const minutesContratuaisEsperados = transformarEmMinutos(saidaEsperadaStr) - transformarEmMinutos(entradaEsperadaStr);
+            const duracaoAlmocoConfigurada = usuario.Horario?.duracaoAlmocoMinutos || 60;
+            
+            let cargaHorariaComAlmocoDefinida = minutesContratuaisEsperados - duracaoAlmocoConfigurada;
+
+            if (usuario.Horario?.utilizaAlmocoAutomatico) {
+              if (batidasValidasParaCalculo.length === 2) {
+                minutosTrabalhadosNoDia -= duracaoAlmocoConfigurada;
+                if (minutosTrabalhadosNoDia < 0) minutosTrabalhadosNoDia = 0;
+              } else if (batidasValidasParaCalculo.length >= 4) {
+                const primeiroAlmocoEntrada = transformarEmMinutos((batidasValidasParaCalculo[1] as any).dataCalculoReal.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' }));
+                const primeiroAlmocoSaida = transformarEmMinutos((batidasValidasParaCalculo[2] as any).dataCalculoReal.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' }));
+                const almocoRealMinutos = primeiroAlmocoSaida - primeiroAlmocoEntrada;
+                const diferencaDeAlmocoTolerada = duracaoAlmocoConfigurada - almocoRealMinutos;
+                if (diferencaDeAlmocoTolerada > 0) {
+                  minutosTrabalhadosNoDia -= diferencaDeAlmocoTolerada;
+                }
+              }
+            }
+
+            if (minutosTrabalhadosNoDia === 0 && batidasValidasParaCalculo.length === 0) {
               status = 'FALTA';
             } else {
-              status = 'TRABALHADO';
-              for (let i = 0; i < batidasDoDia.length; i += 2) {
-                if (i + 1 < batidasDoDia.length) {
-                  const entradaMinutos = transformarEmMinutos((batidasDoDia[i] as any).dataCalculoReal.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' }));
-                  const saidaMinutos = transformarEmMinutos((batidasDoDia[i+1] as any).dataCalculoReal.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' }));
-                  minutosTrabalhadosNoDia += (saidaMinutos - entradaMinutos);
-                }
-              }
-
-              const minutosContratuaisEsperados = transformarEmMinutos(saidaEsperadaStr) - transformarEmMinutos(entradaEsperadaStr);
-              const duracaoAlmocoConfigurada = usuario.Horario?.duracaoAlmocoMinutos || 60;
-              
-              // 🟢 CORREÇÃO DA CARGA HORÁRIA DEVER: A carga diária obrigatória real é sempre descontando o almoço da escala contratual
-              let cargaHorariaComAlmocoDefinida = minutosContratuaisEsperados - duracaoAlmocoConfigurada;
-
-              if (usuario.Horario?.utilizaAlmocoAutomatico) {
-                if (batidasDoDia.length === 2) {
-                  minutosTrabalhadosNoDia -= duracaoAlmocoConfigurada;
-                  if (minutosTrabalhadosNoDia < 0) minutosTrabalhadosNoDia = 0;
-                } else if (batidasDoDia.length >= 4) {
-                  const primeiroAlmocoEntrada = transformarEmMinutos((batidasDoDia[1] as any).dataCalculoReal.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' }));
-                  const primeiroAlmocoSaida = transformarEmMinutos((batidasDoDia[2] as any).dataCalculoReal.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' }));
-                  const almocoRealMinutos = primeiroAlmocoSaida - primeiroAlmocoEntrada;
-                  const diferencaDeAlmocoTolerada = duracaoAlmocoConfigurada - almocoRealMinutos;
-                  if (diferencaDeAlmocoTolerada > 0) {
-                    minutosTrabalhadosNoDia -= diferencaDeAlmocoTolerada;
-                  }
-                }
-              }
-
               saldoDoDiaMinutos = minutosTrabalhadosNoDia - cargaHorariaComAlmocoDefinida;
             }
           }
@@ -264,12 +267,12 @@ export const RelatorioController = {
             }
           }
         } else {
-          if (batidasDoDia.length > 0) {
+          if (batidasValidasParaCalculo.length > 0) {
             status = 'EXTRA_FOLGA';
-            for (let i = 0; i < batidasDoDia.length; i += 2) {
-              if (i + 1 < batidasDoDia.length) {
-                const entradaMinutos = transformarEmMinutos((batidasDoDia[i] as any).dataCalculoReal.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' }));
-                const saidaMinutos = transformarEmMinutos((batidasDoDia[i+1] as any).dataCalculoReal.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' }));
+            for (let i = 0; i < batidasValidasParaCalculo.length; i += 2) {
+              if (i + 1 < batidasValidasParaCalculo.length) {
+                const entradaMinutos = transformarEmMinutos((batidasValidasParaCalculo[i] as any).dataCalculoReal.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' }));
+                const saidaMinutos = transformarEmMinutos((batidasValidasParaCalculo[i+1] as any).dataCalculoReal.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' }));
                 minutosTrabalhadosNoDia += (saidaMinutos - entradaMinutos);
               }
             }
@@ -279,20 +282,20 @@ export const RelatorioController = {
 
         saldoBancoHorasMinutos += saldoDoDiaMinutos;
 
-        const batidasFiltradasParaExibicao = batidasDoDia.filter(b => {
-          return !(b.modificacoes && b.modificacoes.length > 0 && b.modificacoes[0].dataHoraNova.getTime() === 0);
-        });
-
-        const batidasFormatadasComCoordenadas = batidasFiltradasParaExibicao.map(b => {
+        // O mapeamento estruturado do feed para o Dashboard Web se mantém intacto
+        const batidasFormatadasComCoordenadas = batidasDoDia.map(b => {
           const foiModificado = b.modificacoes && b.modificacoes.length > 0;
+          const foiDesconsiderado = foiModificado && b.modificacoes[0].dataHoraNova.getTime() === 0;
+
           return {
             id: b.id,
-            hora: (b as any).dataCalculoReal.toLocaleTimeString('pt-BR', { 
+            hora: foiDesconsiderado ? '--:--' : (b as any).dataCalculoReal.toLocaleTimeString('pt-BR', { 
               hour: '2-digit', 
               minute: '2-digit', 
               timeZone: 'UTC' 
             }),
             foiAlterada: foiModificado,
+            foiDesconsiderada: foiDesconsiderado,
             justificativa: foiModificado ? b.modificacoes[0].justificativa : null,
             horaOriginal: b.dataHora.toLocaleTimeString('pt-BR', {
               hour: '2-digit',
@@ -421,7 +424,12 @@ export const RelatorioController = {
 
         batidasDoDia.sort((a, b) => (a as any).dataCalculoReal.getTime() - (b as any).dataCalculoReal.getTime());
 
-        let trabalhaNoDia = false;
+        // 🟢 FILTRAGEM FISCAL PARA O PDF TEMPLATE: Remove marcações invalidadas
+        const batidasValidasParaCalculo = batidasDoDia.filter(b => {
+          return !(b.modificacoes && b.modificacoes.length > 0 && b.modificacoes[0].dataHoraNova.getTime() === 0);
+        });
+
+        let trabajaNoDia = false;
         let entradaEsperadaStr = '';
         let saidaEsperadaStr = '';
 
@@ -466,41 +474,39 @@ export const RelatorioController = {
 
         if (trabalhaNoDia) {
           status = 'FALTA';
-          if (batidasDoDia.length > 0) {
-            const bPrimeira = batidasDoDia[0];
-            if (bPrimeira.modificacoes && bPrimeira.modificacoes.length > 0 && bPrimeira.modificacoes[0].dataHoraNova.getTime() === 0) {
+          if (batidasValidasParaCalculo.length > 0) {
+            status = 'TRABALHADO';
+            for (let i = 0; i < batidasValidasParaCalculo.length; i += 2) {
+              if (i + 1 < batidasValidasParaCalculo.length) {
+                const entradaMinutos = transformarEmMinutos((batidasValidasParaCalculo[i] as any).dataCalculoReal.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' }));
+                const saidaMinutos = transformarEmMinutos((batidasValidasParaCalculo[i+1] as any).dataCalculoReal.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' }));
+                minutosTrabalhadosNoDia += (saidaMinutos - entradaMinutos);
+              }
+            }
+
+            const minutosContratuaisEsperados = transformarEmMinutos(saidaEsperadaStr) - transformarEmMinutos(entradaEsperadaStr);
+            const duracaoAlmocoConfigurada = usuario.Horario?.duracaoAlmocoMinutos || 60;
+            
+            let cargaHorariaComAlmocoDefinida = minutosContratuaisEsperados - duracaoAlmocoConfigurada;
+
+            if (usuario.Horario?.utilizaAlmocoAutomatico) {
+              if (batidasValidasParaCalculo.length === 2) {
+                minutosTrabalhadosNoDia -= duracaoAlmocoConfigurada;
+                if (minutosTrabalhadosNoDia < 0) minutosTrabalhadosNoDia = 0;
+              } else if (batidasValidasParaCalculo.length >= 4) {
+                const primeiroAlmocoEntrada = transformarEmMinutos((batidasValidasParaCalculo[1] as any).dataCalculoReal.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' }));
+                const primeiroAlmocoSaida = transformarEmMinutos((batidasValidasParaCalculo[2] as any).dataCalculoReal.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' }));
+                const almocoRealMinutos = primeiroAlmocoSaida - primeiroAlmocoEntrada;
+                const diferencaDeAlmocoTolerada = duracaoAlmocoConfigurada - almocoRealMinutos;
+                if (diferencaDeAlmocoTolerada > 0) {
+                  minutosTrabalhadosNoDia -= diferencaDeAlmocoTolerada;
+                }
+              }
+            }
+
+            if (minutosTrabalhadosNoDia === 0 && batidasValidasParaCalculo.length === 0) {
               status = 'FALTA';
             } else {
-              status = 'TRABALHADO';
-              for (let i = 0; i < batidasDoDia.length; i += 2) {
-                if (i + 1 < batidasDoDia.length) {
-                  const entradaMinutos = transformarEmMinutos((batidasDoDia[i] as any).dataCalculoReal.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' }));
-                  const saidaMinutos = transformarEmMinutos((batidasDoDia[i+1] as any).dataCalculoReal.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' }));
-                  minutosTrabalhadosNoDia += (saidaMinutos - entradaMinutos);
-                }
-              }
-
-              const minutosContratuaisEsperados = transformarEmMinutos(saidaEsperadaStr) - transformarEmMinutos(entradaEsperadaStr);
-              const duracaoAlmocoConfigurada = usuario.Horario?.duracaoAlmocoMinutos || 60;
-              
-              // 🟢 CORREÇÃO DA CARGA HORÁRIA DEVER (PDF): A carga diária obrigatória real é sempre descontando o almoço da escala contratual
-              let cargaHorariaComAlmocoDefinida = minutosContratuaisEsperados - duracaoAlmocoConfigurada;
-
-              if (usuario.Horario?.utilizaAlmocoAutomatico) {
-                if (batidasDoDia.length === 2) {
-                  minutosTrabalhadosNoDia -= duracaoAlmocoConfigurada;
-                  if (minutosTrabalhadosNoDia < 0) minutosTrabalhadosNoDia = 0;
-                } else if (batidasDoDia.length >= 4) {
-                  const primeiroAlmocoEntrada = transformarEmMinutos((batidasDoDia[1] as any).dataCalculoReal.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' }));
-                  const primeiroAlmocoSaida = transformarEmMinutos((batidasDoDia[2] as any).dataCalculoReal.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' }));
-                  const almocoRealMinutos = primeiroAlmocoSaida - primeiroAlmocoEntrada;
-                  const diferencaDeAlmocoTolerada = duracaoAlmocoConfigurada - almocoRealMinutos;
-                  if (diferencaDeAlmocoTolerada > 0) {
-                    minutosTrabalhadosNoDia -= diferencaDeAlmocoTolerada;
-                  }
-                }
-              }
-
               saldoDoDiaMinutos = minutosTrabalhadosNoDia - cargaHorariaComAlmocoDefinida;
             }
           }
@@ -520,12 +526,12 @@ export const RelatorioController = {
             }
           }
         } else {
-          if (batidasDoDia.length > 0) {
+          if (batidasValidasParaCalculo.length > 0) {
             status = 'EXTRA_FOLGA';
-            for (let i = 0; i < batidasDoDia.length; i += 2) {
-              if (i + 1 < batidasDoDia.length) {
-                const entradaMinutos = transformarEmMinutos((batidasDoDia[i] as any).dataCalculoReal.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' }));
-                const saidaMinutos = transformarEmMinutos((batidasDoDia[i+1] as any).dataCalculoReal.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' }));
+            for (let i = 0; i < batidasValidasParaCalculo.length; i += 2) {
+              if (i + 1 < batidasValidasParaCalculo.length) {
+                const entradaMinutos = transformarEmMinutos((batidasValidasParaCalculo[i] as any).dataCalculoReal.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' }));
+                const saidaMinutos = transformarEmMinutos((batidasValidasParaCalculo[i+1] as any).dataCalculoReal.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' }));
                 minutosTrabalhadosNoDia += (saidaMinutos - entradaMinutos);
               }
             }
@@ -539,31 +545,15 @@ export const RelatorioController = {
           return !(b.modificacoes && b.modificacoes.length > 0 && b.modificacoes[0].dataHoraNova.getTime() === 0);
         });
 
-        const batidasFormatadasComCoordenadas = batidasFiltradasParaExibicao.map(b => {
-          const foiModificado = b.modificacoes && b.modificacoes.length > 0;
-          return {
-            id: b.id,
-            hora: (b as any).dataCalculoReal.toLocaleTimeString('pt-BR', { 
-              hour: '2-digit', 
-              minute: '2-digit', 
-              timeZone: 'UTC' 
-            }),
-            foiAlterada: foiModificado,
-            justificativa: foiModificado ? b.modificacoes[0].justificativa : null,
-            horaOriginal: b.dataHora.toLocaleTimeString('pt-BR', {
-              hour: '2-digit',
-              minute: '2-digit',
-              timeZone: 'UTC'
-            }),
-            latitude: b.latitude || null,
-            longitude: b.longitude || null
-          };
-        });
+        // Loop original de formatação de string mantido integralmente para herança visual estável do HTML
+        const batidasTexto = batidasFiltradasParaExibicao.length > 0 
+          ? batidasFiltradasParaExibicao.map(b => (b as any).dataCalculoReal.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' })).join('  |  ') 
+          : (status === 'FOLGA' ? '<span style="color:#777; font-style:italic;">FOLGA</span>' : '<span style="color:#dc2626; font-weight:bold;">FALTA UNIFICADA</span>');
 
         historicoDias.push({
           data: dataCorrenteStr,
           status,
-          batidas: batidasFormatadasComCoordenadas,
+          batidasTexto,
           horasTrabalhadas: formatarMinutosParaHoras(minutosTrabalhadosNoDia),
           saldoDoDia: formatarMinutosParaHoras(saldoDoDiaMinutos)
         });
@@ -581,14 +571,10 @@ export const RelatorioController = {
             </tr>
           `;
         } else {
-          const batidasTexto = dia.batidas.length > 0 
-            ? dia.batidas.map(b => b.hora).join('  |  ') 
-            : (dia.status === 'FOLGA' ? '<span style="color:#777; font-style:italic;">FOLGA</span>' : '<span style="color:#dc2626; font-weight:bold;">FALTA UNIFICADA</span>');
-
           linhasHtml += `
             <tr style="line-height: 1.1;">
               <td style="border: 1px solid #444; padding: 3px; text-align: center;">${dia.data}</td>
-              <td style="border: 1px solid #444; padding: 3px; text-align: left; padding-left: 8px; letter-spacing: 0.3px;">${batidasTexto}</td>
+              <td style="border: 1px solid #444; padding: 3px; text-align: left; padding-left: 8px; letter-spacing: 0.3px;">${dia.batidasTexto}</td>
               <td style="border: 1px solid #444; padding: 3px; text-align: center;">${dia.horasTrabalhadas}</td>
               <td style="border: 1px solid #444; padding: 3px; text-align: center;">${dia.saldoDoDia}</td>
             </tr>
