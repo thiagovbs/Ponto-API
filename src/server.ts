@@ -16,10 +16,11 @@ import { setorRoutes } from './routes/setor.routes';
 
 const app = express();
 
+// 🟢 CONFIGURAÇÃO DE CORS CORRIGIDA: Adicionado 'x-totem-token' aos cabeçalhos permitidos para liberar as chamadas complexas do Totem
 app.use(cors({
   origin: '*', 
   methods: ['GET', 'POST', 'PUT', 'DELETE'],
-  allowedHeaders: ['Content-Type', 'Authorization']
+  allowedHeaders: ['Content-Type', 'Authorization', 'x-totem-token']
 }));
 
 app.use(express.json({ limit: '50mb' }));
