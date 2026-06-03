@@ -18,12 +18,46 @@ const formatarMinutosParaHoras = (minutosTotais: number): string => {
 };
 
 export const RelatorioController = {
+  // 🟢 MÉTODO TOTALMENTE CORRIGIDO: Agora calcula e entrega o gráfico semanal para desrepresar o painel web
   async dashboardGeral(req: Request, res: Response): Promise<void> {
     try {
       const { empresaId } = req;
       const hoje = new Date();
-      const dataInicio = new Date(hoje.getFullYear(), hoje.getMonth(), hoje.getDate(), 0, 0, 0);
-      const dataFim = new Date(hoje.getFullYear(), hoje.getMonth(), hoje.getDate(), 23, 59, 59);
+      const dataInicioHoje = new Date(hoje.getFullYear(), hoje.getMonth(), hoje.getDate(), 0, 0, 0);
+      const dataFimHoje = new Date(hoje.getFullYear(), hoje.getMonth(), hoje.getDate(), 23, 59, 59);
+
+      // 🟢 COMPILADOR DO GRÁFICO SEMANAL NATIVO: Mapeia os últimos 7 dias retroativos em fuso UTC
+      const listaDiasGrafico: string[] = [];
+      const contagemDadosGrafico: number[] = [];
+      const diasSemanaNomes = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
+
+      // Monta o array de datas dos últimos 7 dias para fazer buscas atômicas agrupadas
+      for (let i = 6; i >= 0; i--) {
+        const dataPassada = new Date();
+        dataPassada.setDate(hoje.getDate() - i);
+        
+        const nomeDia = diasSemanaNomes[dataPassada.getDay()];
+        listaDiasGrafico.push(nomeDia);
+
+        const inicioDiaPassado = new Date(dataPassada.getFullYear(), dataPassada.getMonth(), dataPassada.getDate(), 0, 0, 0);
+        const fimDiaPassado = new Date(dataPassada.getFullYear(), dataPassada.getMonth(), dataPassada.getDate(), 23, 59, 59);
+
+        // Conta as batidas daquele dia específico que NÃO foram desconsideradas logicamente
+        const totalBatidasDoDiaValidas = await prisma.batidaPonto.count({
+          where: {
+            empresaId: empresaId,
+            dataHora: { gte: inicioDiaPassado, lte: fimDiaPassado },
+            NOT: {
+              modificacoes: {
+                some: {
+                  dataHoraNova: new Date(0) // Filtra fora os pontos desconsiderados
+                }
+              }
+            }
+          }
+        });
+        contagemDadosGrafico.push(totalBatidasDoDiaValidas);
+      }
 
       const [totalFuncionarios, batidasHoje, feedAtividades] = await prisma.$transaction([
         prisma.usuario.count({
@@ -33,8 +67,8 @@ export const RelatorioController = {
           where: {
             empresaId: empresaId,
             dataHora: {
-              gte: dataInicio,
-              lte: dataFim
+              gte: dataInicioHoje,
+              lte: dataFimHoje
             }
           }
         }),
@@ -42,8 +76,8 @@ export const RelatorioController = {
           where: {
             empresaId: empresaId,
             dataHora: {
-              gte: dataInicio,
-              lte: dataFim
+              gte: dataInicioHoje,
+              lte: dataFimHoje
             }
           },
           orderBy: { dataHora: 'desc' },
@@ -58,10 +92,15 @@ export const RelatorioController = {
       res.status(200).json({
         totalFuncionarios,
         batidasHoje,
+        // 🟢 INJEÇÃO DO OBJETO DE GRÁFICO ESTRUTURADO PARA CONSUMO DO CHART.JS NA WEB
+        graficoSemanal: {
+          labels: listaDiasGrafico,
+          dados: contagemDadosGrafico
+        },
         feedAtividades: feedAtividades.map(f => ({
           id: f.id,
           nome: f.usuario.nome,
-          hour: f.dataHora.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' }),
+          hora: f.dataHora.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' }),
           foto: f.fotoBase64,
           latitude: f.latitude,
           longitude: f.longitude
@@ -165,7 +204,7 @@ export const RelatorioController = {
 
         batidasDoDia.sort((a, b) => (a as any).dataCalculoReal.getTime() - (b as any).dataCalculoReal.getTime());
 
-        // 🟢 REGRA FISCAL DE AUDITORIA: Filtra apenas as batidas válidas que NÃO foram desconsideradas
+        // REGRA FISCAL DE AUDITORIA: Filtra apenas as batidas válidas que NÃO foram desconsideradas
         const batidasValidasParaCalculo = batidasDoDia.filter(b => {
           return !(b.modificacoes && b.modificacoes.length > 0 && b.modificacoes[0].dataHoraNova.getTime() === 0);
         });
@@ -225,10 +264,10 @@ export const RelatorioController = {
               }
             }
 
-            const minutesContratuaisEsperados = transformarEmMinutos(saidaEsperadaStr) - transformarEmMinutos(entradaEsperadaStr);
+            const minutosContratuaisEsperados = transformarEmMinutos(saidaEsperadaStr) - transformarEmMinutos(entradaEsperadaStr);
             const duracaoAlmocoConfigurada = usuario.Horario?.duracaoAlmocoMinutos || 60;
             
-            let cargaHorariaComAlmocoDefinida = minutesContratuaisEsperados - duracaoAlmocoConfigurada;
+            let cargaHorariaComAlmocoDefinida = minutosContratuaisEsperados - duracaoAlmocoConfigurada;
 
             if (usuario.Horario?.utilizaAlmocoAutomatico) {
               if (batidasValidasParaCalculo.length === 2) {
@@ -282,7 +321,6 @@ export const RelatorioController = {
 
         saldoBancoHorasMinutos += saldoDoDiaMinutos;
 
-        // O mapeamento estruturado do feed para o Dashboard Web se mantém intacto
         const batidasFormatadasComCoordenadas = batidasDoDia.map(b => {
           const foiModificado = b.modificacoes && b.modificacoes.length > 0;
           const foiDesconsiderado = foiModificado && b.modificacoes[0].dataHoraNova.getTime() === 0;
@@ -349,7 +387,7 @@ export const RelatorioController = {
       });
 
       if (!usuario) {
-        res.status(404).json({ erro: 'Colaborador não identificado.' });
+        res.status(404).json({ coladoradorIdentificado: false });
         return;
       }
 
@@ -424,7 +462,6 @@ export const RelatorioController = {
 
         batidasDoDia.sort((a, b) => (a as any).dataCalculoReal.getTime() - (b as any).dataCalculoReal.getTime());
 
-        // 🟢 FILTRAGEM FISCAL PARA O PDF TEMPLATE: Remove marcações invalidadas
         const batidasValidasParaCalculo = batidasDoDia.filter(b => {
           return !(b.modificacoes && b.modificacoes.length > 0 && b.modificacoes[0].dataHoraNova.getTime() === 0);
         });
@@ -545,7 +582,6 @@ export const RelatorioController = {
           return !(b.modificacoes && b.modificacoes.length > 0 && b.modificacoes[0].dataHoraNova.getTime() === 0);
         });
 
-        // Loop original de formatação de string mantido integralmente para herança visual estável do HTML
         const batidasTexto = batidasFiltradasParaExibicao.length > 0 
           ? batidasFiltradasParaExibicao.map(b => (b as any).dataCalculoReal.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' })).join('  |  ') 
           : (status === 'FOLGA' ? '<span style="color:#777; font-style:italic;">FOLGA</span>' : '<span style="color:#dc2626; font-weight:bold;">FALTA UNIFICADA</span>');
