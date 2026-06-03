@@ -429,7 +429,7 @@ export const RelatorioController = {
           return !(b.modificacoes && b.modificacoes.length > 0 && b.modificacoes[0].dataHoraNova.getTime() === 0);
         });
 
-        let trabajaNoDia = false;
+        let trabalhaNoDia = false;
         let entradaEsperadaStr = '';
         let saidaEsperadaStr = '';
 
