@@ -225,10 +225,12 @@ export const RelatorioController = {
               }
 
               const minutosContratuaisEsperados = transformarEmMinutos(saidaEsperadaStr) - transformarEmMinutos(entradaEsperadaStr);
-              let cargaHorariaComAlmocoDefinida = minutosContratuaisEsperados;
+              const duracaoAlmocoConfigurada = usuario.Horario?.duracaoAlmocoMinutos || 60;
+              
+              // 🟢 CORREÇÃO DA CARGA HORÁRIA DEVER: A carga diária obrigatória real é sempre descontando o almoço da escala contratual
+              let cargaHorariaComAlmocoDefinida = minutosContratuaisEsperados - duracaoAlmocoConfigurada;
 
               if (usuario.Horario?.utilizaAlmocoAutomatico) {
-                const duracaoAlmocoConfigurada = usuario.Horario.duracaoAlmocoMinutos || 60;
                 if (batidasDoDia.length === 2) {
                   minutosTrabalhadosNoDia -= duracaoAlmocoConfigurada;
                   if (minutosTrabalhadosNoDia < 0) minutosTrabalhadosNoDia = 0;
@@ -241,8 +243,6 @@ export const RelatorioController = {
                     minutosTrabalhadosNoDia -= diferencaDeAlmocoTolerada;
                   }
                 }
-              } else {
-                cargaHorariaComAlmocoDefinida = minutosContratuaisEsperados - 60;
               }
 
               saldoDoDiaMinutos = minutosTrabalhadosNoDia - cargaHorariaComAlmocoDefinida;
@@ -258,7 +258,8 @@ export const RelatorioController = {
             } else {
               totalFaltas++;
               const minutosContratuaisEsperados = transformarEmMinutos(saidaEsperadaStr) - transformarEmMinutos(entradaEsperadaStr);
-              const cargaDeveriaTerSidoFeita = usuario.Horario?.utilizaAlmocoAutomatico ? minutosContratuaisEsperados : (minutosContratuaisEsperados - 60);
+              const duracaoAlmocoConfigurada = usuario.Horario?.duracaoAlmocoMinutos || 60;
+              const cargaDeveriaTerSidoFeita = minutosContratuaisEsperados - duracaoAlmocoConfigurada;
               saldoDoDiaMinutos = -cargaDeveriaTerSidoFeita;
             }
           }
@@ -480,10 +481,12 @@ export const RelatorioController = {
               }
 
               const minutosContratuaisEsperados = transformarEmMinutos(saidaEsperadaStr) - transformarEmMinutos(entradaEsperadaStr);
-              let cargaHorariaComAlmocoDefinida = minutosContratuaisEsperados;
+              const duracaoAlmocoConfigurada = usuario.Horario?.duracaoAlmocoMinutos || 60;
+              
+              // 🟢 CORREÇÃO DA CARGA HORÁRIA DEVER (PDF): A carga diária obrigatória real é sempre descontando o almoço da escala contratual
+              let cargaHorariaComAlmocoDefinida = minutosContratuaisEsperados - duracaoAlmocoConfigurada;
 
               if (usuario.Horario?.utilizaAlmocoAutomatico) {
-                const duracaoAlmocoConfigurada = usuario.Horario.duracaoAlmocoMinutos || 60;
                 if (batidasDoDia.length === 2) {
                   minutosTrabalhadosNoDia -= duracaoAlmocoConfigurada;
                   if (minutosTrabalhadosNoDia < 0) minutosTrabalhadosNoDia = 0;
@@ -496,8 +499,6 @@ export const RelatorioController = {
                     minutosTrabalhadosNoDia -= diferencaDeAlmocoTolerada;
                   }
                 }
-              } else {
-                cargaHorariaComAlmocoDefinida = minutosContratuaisEsperados - 60;
               }
 
               saldoDoDiaMinutos = minutosTrabalhadosNoDia - cargaHorariaComAlmocoDefinida;
@@ -513,7 +514,8 @@ export const RelatorioController = {
             } else {
               totalFaltas++;
               const minutosContratuaisEsperados = transformarEmMinutos(saidaEsperadaStr) - transformarEmMinutos(entradaEsperadaStr);
-              const cargaDeveriaTerSidoFeita = usuario.Horario?.utilizaAlmocoAutomatico ? minutosContratuaisEsperados : (minutosContratuaisEsperados - 60);
+              const duracaoAlmocoConfigurada = usuario.Horario?.duracaoAlmocoMinutos || 60;
+              const cargaDeveriaTerSidoFeita = minutosContratuaisEsperados - duracaoAlmocoConfigurada;
               saldoDoDiaMinutos = -cargaDeveriaTerSidoFeita;
             }
           }
