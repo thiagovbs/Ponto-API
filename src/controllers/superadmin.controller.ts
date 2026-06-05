@@ -8,7 +8,7 @@ export const SuperAdminController = {
   async cadastrarEmpresa(req: Request, res: Response): Promise<void> {
     try {
       // 🔒 Segurança Máxima: Valida se QUEM está chamando essa rota é de fato você (SUPER_ADMIN)
-      if (req.usuario?.perfil !== 'SUPER_ADMIN') {
+      if ((req as any).usuario?.perfil !== 'SUPER_ADMIN') {
         res.status(403).json({ erro: 'Acesso negado. Rota restrita ao proprietário do sistema.' });
         return;
       }
@@ -101,7 +101,7 @@ export const SuperAdminController = {
   // 📋 LISTAR TODAS AS ORGANIZAÇÕES PARCEIRAS DO ECOSSISTEMA
   async listarEmpresas(req: Request, res: Response): Promise<void> {
     try {
-      if (req.usuario?.perfil !== 'SUPER_ADMIN') {
+      if ((req as any).usuario?.perfil !== 'SUPER_ADMIN') {
         res.status(403).json({ erro: 'Acesso negado. Rota restrita ao proprietário do sistema.' });
         return;
       }
@@ -120,12 +120,13 @@ export const SuperAdminController = {
   // 🚫 ALTERAR STATUS OPERACIONAL DA EMPRESA (BLOQUEIO LÓGICO)
   async atualizarEmpresa(req: Request, res: Response): Promise<void> {
     try {
-      if (req.usuario?.perfil !== 'SUPER_ADMIN') {
+      if ((req as any).usuario?.perfil !== 'SUPER_ADMIN') {
         res.status(403).json({ erro: 'Acesso negado. Rota restrita ao proprietário do sistema.' });
         return;
       }
 
-      const { id } = req.params;
+      // 🛡️ CASTING ESTRITO
+      const id = req.params.id as string;
       const { ativo } = req.body;
 
       if (ativo === undefined) {
@@ -148,7 +149,7 @@ export const SuperAdminController = {
   // 🔑 REDEFINIR FORÇADO A SENHA DO ADMINISTRADOR CLIENTE
   async alterarSenhaAdminCliente(req: Request, res: Response): Promise<void> {
     try {
-      if (req.usuario?.perfil !== 'SUPER_ADMIN') {
+      if ((req as any).usuario?.perfil !== 'SUPER_ADMIN') {
         res.status(403).json({ erro: 'Acesso negado. Rota restrita ao proprietário do sistema.' });
         return;
       }
@@ -193,7 +194,9 @@ export const SuperAdminController = {
   // 👥 CADASTRAR OUTRO INTEGRANTE NA EQUIPE SUPER_ADMIN (MESMA ORGANIZAÇÃO MATRIZ)
   async cadastrarMembroEquipeMaster(req: Request, res: Response): Promise<void> {
     try {
-      if (req.usuario?.perfil !== 'SUPER_ADMIN') {
+      const superAdminLogado = (req as any).usuario;
+
+      if (superAdminLogado?.perfil !== 'SUPER_ADMIN') {
         res.status(403).json({ erro: 'Acesso negado. Rota restrita ao proprietário do sistema.' });
         return;
       }
@@ -213,7 +216,7 @@ export const SuperAdminController = {
 
       // 🔄 HERANÇA DINÂMICA: Localiza os dados da empresa matriz baseando-se no super admin logado
       const superAdminAtual = await prisma.usuario.findUnique({
-        where: { id: req.usuario.id }
+        where: { id: superAdminLogado.id as string }
       });
 
       if (!superAdminAtual || !superAdminAtual.empresaId || !superAdminAtual.filialId || !superAdminAtual.setorId) {
@@ -255,14 +258,16 @@ export const SuperAdminController = {
   // 📋 LISTAR MEMBROS DA EQUIPE SUPER_ADMIN
   async listarMembrosEquipeMaster(req: Request, res: Response): Promise<void> {
     try {
-      if (req.usuario?.perfil !== 'SUPER_ADMIN') {
+      const superAdminLogado = (req as any).usuario;
+
+      if (superAdminLogado?.perfil !== 'SUPER_ADMIN') {
         res.status(403).json({ erro: 'Acesso negado. Rota restrita ao proprietário do sistema.' });
         return;
       }
 
       // Busca o super admin atual para filtrar pela mesma empresa matriz
       const superAdminAtual = await prisma.usuario.findUnique({
-        where: { id: req.usuario.id }
+        where: { id: superAdminLogado.id as string }
       });
 
       if (!superAdminAtual) {

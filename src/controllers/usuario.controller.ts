@@ -5,11 +5,12 @@ import bcrypt from 'bcrypt';
 export const UsuarioController = {
   async criarUsuario(req: Request, res: Response): Promise<void> {
     try {
-      const { empresaId } = req;
+      // 🛡️ CASTING ESTRITO
+      const empresaId = (req as any).empresaId as string;
       const { nome, cpf, senha, perfil, horarioBaseId, dataInicioEscala, filialId, setorId } = req.body;
       
-      const administradorId = req.usuario?.id;
-      const ip = req.ip || req.socket.remoteAddress;
+      const administradorId = (req as any).usuario?.id as string | undefined;
+      const ip = (req.ip || req.socket.remoteAddress) as string | undefined;
 
       if (!nome || !cpf || !senha || !filialId || !setorId) {
         res.status(400).json({ erro: 'Nome, CPF, senha, filial e setor são obrigatórios.' });
@@ -33,7 +34,7 @@ export const UsuarioController = {
         cpf,
         senhaHash: senhaHash,
         perfil,
-        empresaId: empresaId!, 
+        empresaId: empresaId, 
         filialId,
         setorId,
         horarioBaseId: perfil === 'FUNCIONARIO' && horarioBaseId ? horarioBaseId : null,
@@ -76,12 +77,13 @@ export const UsuarioController = {
 
   async atualizarUsuario(req: Request, res: Response): Promise<void> {
     try {
-      const { id } = req.params;
-      const { empresaId } = req;
+      // 🛡️ CASTING ESTRITO
+      const id = req.params.id as string;
+      const empresaId = (req as any).empresaId as string;
       const { nome, cpf, senha, perfil, horarioBaseId, dataInicioEscala, filialId, setorId } = req.body;
       
-      const administradorId = req.usuario?.id;
-      const ip = req.ip || req.socket.remoteAddress;
+      const administradorId = (req as any).usuario?.id as string | undefined;
+      const ip = (req.ip || req.socket.remoteAddress) as string | undefined;
 
       const usuarioAntes = await prisma.usuario.findFirst({
         where: { id, empresaId: empresaId },
@@ -146,10 +148,11 @@ export const UsuarioController = {
 
   async excluirUsuario(req: Request, res: Response): Promise<void> {
     try {
-      const { id } = req.params;
-      const { empresaId } = req;
-      const administradorId = req.usuario?.id;
-      const ip = req.ip || req.socket.remoteAddress;
+      // 🛡️ CASTING ESTRITO
+      const id = req.params.id as string;
+      const empresaId = (req as any).empresaId as string;
+      const administradorId = (req as any).usuario?.id as string | undefined;
+      const ip = (req.ip || req.socket.remoteAddress) as string | undefined;
 
       const usuarioAntes = await prisma.usuario.findFirst({
         where: { id, empresaId: empresaId }
@@ -185,7 +188,7 @@ export const UsuarioController = {
 
   async listarUsuarios(req: Request, res: Response): Promise<void> {
     try {
-      let empresaIdEfetivo = req.empresaId;
+      let empresaIdEfetivo = (req as any).empresaId as string | undefined;
       const totemHeader = req.headers['x-totem-token'];
 
       // Camada de escape seguro para revalidação inline do token do totem

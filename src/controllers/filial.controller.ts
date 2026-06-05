@@ -5,10 +5,11 @@ export const FilialController = {
   // ➕ CADASTRAR FILIAL
   async criar(req: Request, res: Response): Promise<void> {
     try {
-      const { empresaId } = req; // 🔒 Middleware de Tenant garante esse ID
+      // 🛡️ CASTING ESTRITO: Garante que os dados do middleware e da rede sejam lidos de forma segura
+      const empresaId = (req as any).empresaId as string;
       const { nome, cnpj } = req.body;
-      const administradorId = req.usuario?.id;
-      const ip = req.ip || req.socket.remoteAddress;
+      const administradorId = (req as any).usuario?.id as string | undefined;
+      const ip = (req.ip || req.socket.remoteAddress) as string | undefined;
 
       if (!nome || !cnpj) {
         res.status(400).json({ erro: 'Nome e CNPJ são campos obrigatórios.' });
@@ -27,7 +28,7 @@ export const FilialController = {
           data: {
             nome,
             cnpj,
-            empresaId: empresaId! // 🔒 Isolamento garantido
+            empresaId: empresaId // 🔒 Isolamento garantido
           }
         }),
         prisma.logAuditoria.create({
@@ -52,10 +53,11 @@ export const FilialController = {
   // 🔄 LISTAR FILIAIS DA EMPRESA
   async listar(req: Request, res: Response): Promise<void> {
     try {
-      const { empresaId } = req;
+      // 🛡️ CASTING ESTRITO
+      const empresaId = (req as any).empresaId as string;
 
       const filiais = await prisma.filial.findMany({
-        where: { empresaId: empresaId! }, // 🔒 Filtra apenas dados da empresa do Admin
+        where: { empresaId: empresaId }, // 🔒 Filtra apenas dados da empresa do Admin
         orderBy: { nome: 'asc' }
       });
 
@@ -69,15 +71,16 @@ export const FilialController = {
   // ✏️ ATUALIZAR FILIAL
   async atualizar(req: Request, res: Response): Promise<void> {
     try {
-      const { id } = req.params;
-      const { empresaId } = req;
+      // 🛡️ CASTING ESTRITO: Evita o erro TS2322 (Type 'string | string[]' is not assignable to type 'string')
+      const id = req.params.id as string;
+      const empresaId = (req as any).empresaId as string;
       const { nome, cnpj } = req.body;
-      const administradorId = req.usuario?.id;
-      const ip = req.ip || req.socket.remoteAddress;
+      const administradorId = (req as any).usuario?.id as string | undefined;
+      const ip = (req.ip || req.socket.remoteAddress) as string | undefined;
 
       // 🔒 Segurança contra invasão entre Tenants
       const filialExistente = await prisma.filial.findFirst({
-        where: { id, empresaId: empresaId! }
+        where: { id, empresaId: empresaId }
       });
 
       if (!filialExistente) {
@@ -115,13 +118,14 @@ export const FilialController = {
   // ❌ DELETAR FILIAL
   async deletar(req: Request, res: Response): Promise<void> {
     try {
-      const { id } = req.params;
-      const { empresaId } = req;
-      const administradorId = req.usuario?.id;
-      const ip = req.ip || req.socket.remoteAddress;
+      // 🛡️ CASTING ESTRITO
+      const id = req.params.id as string;
+      const empresaId = (req as any).empresaId as string;
+      const administradorId = (req as any).usuario?.id as string | undefined;
+      const ip = (req.ip || req.socket.remoteAddress) as string | undefined;
 
       const filialExistente = await prisma.filial.findFirst({
-        where: { id, empresaId: empresaId! }
+        where: { id, empresaId: empresaId }
       });
 
       if (!filialExistente) {

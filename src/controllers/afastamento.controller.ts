@@ -6,9 +6,10 @@ export const AfastamentoController = {
   async cadastrar(req: Request, res: Response): Promise<void> {
     try {
       const { usuarioId, tipo, dataInicio, dataFim, justificativa } = req.body;
-      const { empresaId } = req; // 🔒 Injetado pelo Middleware de Tenant
-      const quemCadastrouId = req.usuario?.id;
-      const ip = req.ip || req.socket.remoteAddress;
+      // 🛡️ CASTING ESTRITO: Injetado pelo Middleware de Tenant de forma segura para o TypeScript
+      const empresaId = (req as any).empresaId as string; 
+      const quemCadastrouId = (req as any).usuario?.id as string | undefined;
+      const ip = (req.ip || req.socket.remoteAddress) as string | undefined;
 
       if (!usuarioId || !tipo || !dataInicio || !dataFim || !justificativa) {
         res.status(400).json({ erro: 'Todos os campos são de preenchimento obrigatório.' });
@@ -69,7 +70,7 @@ export const AfastamentoController = {
             dataInicio: inicio,
             dataFim: fim,
             justificativa,
-            empresaId: empresaId! // 🔒 Grava vinculando ao Tenant atual
+            empresaId: empresaId // 🔒 Grava vinculando ao Tenant atual
           },
           include: {
             usuario: { select: { nome: true, cpf: true } }
@@ -111,8 +112,9 @@ export const AfastamentoController = {
   // 2. LISTAR TODOS OS AFASTAMENTOS LANÇADOS (CORRIGIDO E MULTI-TENANT)
   async listar(req: Request, res: Response): Promise<void> {
     try {
-      const { usuarioId } = req.query;
-      const { empresaId } = req; // Injetado pelo middleware
+      // 🛡️ CASTING ESTRITO: Impede conflito de parâmetros de query
+      const usuarioId = req.query.usuarioId as string | undefined;
+      const empresaId = (req as any).empresaId as string; // Injetado pelo middleware
 
       // 🟢 CORRIGIDO: Monta a query espalhando os filtros dinâmicos de forma nativa para o Prisma
       const whereClause: any = {
@@ -120,7 +122,7 @@ export const AfastamentoController = {
       };
 
       if (usuarioId) {
-        whereClause.usuarioId = usuarioId as string;
+        whereClause.usuarioId = usuarioId;
       }
 
       const afastamentos = await prisma.afastamento.findMany({
@@ -143,10 +145,11 @@ export const AfastamentoController = {
   // 3. REMOVER/CANCELAR UM AFASTAMENTO LANÇADO
   async deletar(req: Request, res: Response): Promise<void> {
     try {
-      const { id } = req.params;
-      const { empresaId } = req;
-      const quemDeletouId = req.usuario?.id;
-      const ip = req.ip || req.socket.remoteAddress;
+      // 🛡️ CASTING ESTRITO
+      const id = req.params.id as string;
+      const empresaId = (req as any).empresaId as string;
+      const quemDeletouId = (req as any).usuario?.id as string | undefined;
+      const ip = (req.ip || req.socket.remoteAddress) as string | undefined;
 
       // 🟢 CORRIGIDO: Valida se o registro pertence à empresa antes de deletar (Evita ID spoofing)
       const registro = await prisma.afastamento.findFirst({
@@ -192,11 +195,12 @@ export const AfastamentoController = {
   // 4. ATUALIZAR/EDITAR UM AFASTAMENTO EXISTENTE
   async editar(req: Request, res: Response): Promise<void> {
     try {
-      const { id } = req.params;
-      const { empresaId } = req;
+      // 🛡️ CASTING ESTRITO
+      const id = req.params.id as string;
+      const empresaId = (req as any).empresaId as string;
       const { tipo, dataInicio, dataFim, justificativa } = req.body;
-      const quemAlterouId = req.usuario?.id;
-      const ip = req.ip || req.socket.remoteAddress;
+      const quemAlterouId = (req as any).usuario?.id as string | undefined;
+      const ip = (req.ip || req.socket.remoteAddress) as string | undefined;
 
       if (!tipo || !dataInicio || !dataFim || !justificativa) {
         res.status(400).json({ erro: 'Todos os campos são de preenchimento obrigatório para a atualização.' });

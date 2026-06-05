@@ -10,7 +10,8 @@ export const PontoController = {
   async registrarPonto(req: Request, res: Response): Promise<void> {
     try {
       const { usuarioId, fotoBase64, latitude, longitude, dataHora } = req.body;
-      const ip = req.ip || req.socket.remoteAddress;
+      // 🛡️ CASTING ESTRITO: Garante que o IP seja interpretado de forma segura pelo TypeScript
+      const ip = (req.ip || req.socket.remoteAddress) as string | undefined;
 
       if (
         !usuarioId || 
@@ -84,7 +85,8 @@ export const PontoController = {
   // 📋 LISTAR TODAS AS BATIDAS DA ORGANIZAÇÃO (TENANT)
   async listarBatidas(req: Request, res: Response): Promise<void> {
     try {
-      const { empresaId } = req;
+      // 🛡️ CASTING ESTRITO: Garante que o ID da empresa vindo do middleware seja string
+      const empresaId = (req as any).empresaId as string;
 
       const batidas = await prisma.batidaPonto.findMany({
         where: {
@@ -117,11 +119,12 @@ export const PontoController = {
   // 📝 AJUSTAR HORÁRIO DE MARCAÇÃO EXISTENTE (PORTARIA 671 MTE)
   async ajustarBatidaPonto(req: Request, res: Response): Promise<void> {
     try {
-      const { batidaId } = req.params;
-      const { empresaId } = req;
+      // 🛡️ CASTING ESTRITO: Impede o conflito de string | string[]
+      const batidaId = req.params.batidaId as string;
+      const empresaId = (req as any).empresaId as string;
       const { novaHora, novaData, justificativa } = req.body;
-      const quemAlterouId = req.usuario?.id; 
-      const ip = req.ip || req.socket.remoteAddress;
+      const quemAlterouId = (req as any).usuario?.id as string | undefined; 
+      const ip = (req.ip || req.socket.remoteAddress) as string | undefined;
 
       if (!justificativa || justificativa.trim().length < 10) {
         res.status(400).json({ erro: 'Uma justificativa de no mínimo 10 caracteres é obrigatória.' });
@@ -203,10 +206,11 @@ export const PontoController = {
   // ➕ INCLUIR MARCAÇÃO DE PONTO MANUAL AVULSA
   async incluirPontoManualmente(req: Request, res: Response): Promise<void> {
     try {
-      const { empresaId } = req;
+      // 🛡️ CASTING ESTRITO
+      const empresaId = (req as any).empresaId as string;
       const { usuarioId, dataDia, hora, justificativa } = req.body;
-      const quemAlterouId = req.usuario?.id;
-      const ip = req.ip || req.socket.remoteAddress;
+      const quemAlterouId = (req as any).usuario?.id as string | undefined;
+      const ip = (req.ip || req.socket.remoteAddress) as string | undefined;
 
       if (!usuarioId || !dataDia || !hora || !justificativa || justificativa.trim().length < 10) {
         res.status(400).json({ erro: 'Todos os campos, incluindo justificativa de no mínimo 10 caracteres, são obrigatórios.' });
@@ -232,7 +236,7 @@ export const PontoController = {
             fotoBase64: "INCLUSAO_MANUAL_ADMIN", 
             latitude: 0,
             longitude: 0,
-            empresaId: empresaId!,
+            empresaId: empresaId,
             setorId: usuario.setorId
           }
         });
@@ -282,11 +286,12 @@ export const PontoController = {
   // 🚫 DESCONSIDERAR MARCAÇÃO LOGICAMENTE (DEDUÇÃO FISCAL)
   async desconsiderarBatidaPonto(req: Request, res: Response): Promise<void> {
     try {
-      const { batidaId } = req.params;
-      const { empresaId } = req;
+      // 🛡️ CASTING ESTRITO
+      const batidaId = req.params.batidaId as string;
+      const empresaId = (req as any).empresaId as string;
       const { justificativa } = req.body;
-      const quemAlterouId = req.usuario?.id; 
-      const ip = req.ip || req.socket.remoteAddress;
+      const quemAlterouId = (req as any).usuario?.id as string | undefined; 
+      const ip = (req.ip || req.socket.remoteAddress) as string | undefined;
 
       if (!justificativa || justificativa.trim().length < 10) {
         res.status(400).json({ erro: 'Uma justificativa de no mínimo 10 caracteres é obrigatória para desconsiderar um ponto.' });
