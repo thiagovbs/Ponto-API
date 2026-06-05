@@ -5,7 +5,8 @@ export const HorarioController = {
   // 1. CRIAR JORNADA (ISOLADA POR EMPRESA)
   async criarHorario(req: Request, res: Response): Promise<void> {
     try {
-      const { empresaId } = req; // 🔒 Capturado com total segurança através do Token JWT pelo Middleware de Tenant
+      // 🛡️ CASTING ESTRITO
+      const empresaId = (req as any).empresaId as string; 
       const { 
         descricao, 
         tipoEscala, 
@@ -18,8 +19,8 @@ export const HorarioController = {
         saidaAlternada    
       } = req.body;
 
-      const administradorId = req.usuario?.id;
-      const ip = req.ip || req.socket.remoteAddress;
+      const administradorId = (req as any).usuario?.id as string | undefined;
+      const ip = (req.ip || req.socket.remoteAddress) as string | undefined;
 
       if (!descricao) {
         res.status(400).json({ erro: 'A descrição da jornada é obrigatória.' });
@@ -59,7 +60,7 @@ export const HorarioController = {
             horaSaidaDomingo: regraDomingo.saida,
             trabalhaDomingoAlt: trabalhaDomingoAlt || false,
             domingoInicioImpar: domingoInicioImpar !== undefined ? domingoInicioImpar : true,
-            empresaId: empresaId! // 🔒 Vincula a nova jornada permanentemente ao Tenant ativo
+            empresaId: empresaId // 🔒 Vincula a nova jornada permanentemente ao Tenant ativo
           }
         }),
 
@@ -90,7 +91,8 @@ export const HorarioController = {
   // 2. LISTAR JORNADAS (FILTRADO POR EMPRESA)
   async listarHorarios(req: Request, res: Response): Promise<void> {
     try {
-      const { empresaId } = req; // 🔒 Coletado via Token
+      // 🛡️ CASTING ESTRITO
+      const empresaId = (req as any).empresaId as string; 
 
       const horarios = await prisma.horario.findMany({
         where: {
@@ -108,8 +110,9 @@ export const HorarioController = {
   // 3. ATUALIZAR JORNADA (VALIDANDO PROPRIEDADE CORPORATIVA)
   async atualizarHorario(req: Request, res: Response): Promise<void> {
     try {
-      const { id } = req.params;
-      const { empresaId } = req; // 🔒 Coletado do Token
+      // 🛡️ CASTING ESTRITO
+      const id = req.params.id as string;
+      const empresaId = (req as any).empresaId as string; 
       const { 
         descricao, 
         tipoEscala, 
@@ -122,8 +125,8 @@ export const HorarioController = {
         saidaAlternada    
       } = req.body;
 
-      const administradorId = req.usuario?.id;
-      const ip = req.ip || req.socket.remoteAddress;
+      const administradorId = (req as any).usuario?.id as string | undefined;
+      const ip = (req.ip || req.socket.remoteAddress) as string | undefined;
 
       // 🔒 Valida rigorosamente se o Horário pertence a esta empresa antes de atualizar
       const horarioExistente = await prisma.horario.findFirst({ 

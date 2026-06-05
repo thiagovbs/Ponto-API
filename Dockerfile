@@ -18,7 +18,7 @@ RUN npx prisma generate
 COPY . .
 
 # 7. Compila o projeto TypeScript (se aplicável) ou prepara o esbuild
-RUN npm run build --if-present || true
+RUN npm run build --if-present
 
 # 8. Expõe a porta que a sua API usa
 EXPOSE 3003

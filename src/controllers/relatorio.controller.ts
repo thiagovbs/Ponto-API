@@ -21,7 +21,8 @@ export const RelatorioController = {
   // 🟢 MÉTODO TOTALMENTE CORRIGIDO: Agora calcula e entrega o gráfico semanal para desrepresar o painel web
   async dashboardGeral(req: Request, res: Response): Promise<void> {
     try {
-      const { empresaId } = req;
+      // 🛡️ CASTING ESTRITO: Garante que o ID da empresa é uma string pura
+      const empresaId = (req as any).empresaId as string;
       const hoje = new Date();
       const dataInicioHoje = new Date(hoje.getFullYear(), hoje.getMonth(), hoje.getDate(), 0, 0, 0);
       const dataFimHoje = new Date(hoje.getFullYear(), hoje.getMonth(), hoje.getDate(), 23, 59, 59);
@@ -114,9 +115,11 @@ export const RelatorioController = {
 
   async relatorioMensalPorFuncionario(req: Request, res: Response): Promise<void> {
     try {
-      const { usuarioId } = req.params;
-      const { mes, ano } = req.query;
-      const { empresaId } = req;
+      // 🛡️ CASTING ESTRITO: Impede o conflito de string | string[]
+      const usuarioId = req.params.usuarioId as string;
+      const mes = req.query.mes as string;
+      const ano = req.query.ano as string;
+      const empresaId = (req as any).empresaId as string;
 
       if (!usuarioId || !mes || !ano) {
         res.status(400).json({ erro: 'Os parâmetros usuarioId, mes e ano são obrigatórios.' });
@@ -133,15 +136,15 @@ export const RelatorioController = {
         return;
       }
 
-      const mesInt = parseInt(mes as string, 10);
-      const anoInt = parseInt(ano as string, 10);
+      const mesInt = parseInt(mes, 10);
+      const anoInt = parseInt(ano, 10);
 
       const dataInicio = new Date(anoInt, mesInt - 1, 1);
       const dataFim = new Date(anoInt, mesInt, 0, 23, 59, 59);
 
       const todasBatidas = await prisma.batidaPonto.findMany({
         where: {
-          usuarioId,
+          usuarioId: usuarioId,
           empresaId: empresaId,
           dataHora: {
             gte: dataInicio,
@@ -372,9 +375,11 @@ export const RelatorioController = {
   
   async emitirPDFEspelho(req: Request, res: Response): Promise<void> {
     try {
-      const { usuarioId } = req.params;
-      const { mes, ano } = req.query;
-      const { empresaId } = req;
+      // 🛡️ CASTING ESTRITO: Impede o conflito de string | string[]
+      const usuarioId = req.params.usuarioId as string;
+      const mes = req.query.mes as string;
+      const ano = req.query.ano as string;
+      const empresaId = (req as any).empresaId as string;
 
       if (!usuarioId || !mes || !ano) {
         res.status(400).json({ erro: 'Parâmetros insuficientes para geração do documento.' });
@@ -391,15 +396,15 @@ export const RelatorioController = {
         return;
       }
 
-      const mesInt = parseInt(mes as string, 10);
-      const anoInt = parseInt(ano as string, 10);
+      const mesInt = parseInt(mes, 10);
+      const anoInt = parseInt(ano, 10);
 
       const dataInicio = new Date(anoInt, mesInt - 1, 1);
       const dataFim = new Date(anoInt, mesInt, 0, 23, 59, 59);
 
       const todasBatidas = await prisma.batidaPonto.findMany({
         where: {
-          usuarioId,
+          usuarioId: usuarioId,
           empresaId: empresaId,
           dataHora: {
             gte: dataInicio,
@@ -725,8 +730,10 @@ export const RelatorioController = {
 
   async downloadAEF(req: Request, res: Response): Promise<void> {
     try {
-      const { dataInicio, dataFim } = req.query;
-      const { empresaId } = req;
+      // 🛡️ CASTING ESTRITO: Impede o conflito de string | string[]
+      const dataInicio = req.query.dataInicio as string;
+      const dataFim = req.query.dataFim as string;
+      const empresaId = (req as any).empresaId as string;
 
       if (!dataInicio || !dataFim) {
         res.status(400).json({ erro: 'As datas de início e fim são obrigatórias para a extração fiscal.' });
@@ -743,8 +750,8 @@ export const RelatorioController = {
       }
 
       const conteudoTxt = await gerarConteudoAEF(
-        new Date(String(dataInicio)),
-        new Date(String(dataFim)),
+        new Date(dataInicio),
+        new Date(dataFim),
         empresa.cnpj,
         empresa.razaoSocial
       );

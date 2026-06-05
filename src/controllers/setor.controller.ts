@@ -5,10 +5,11 @@ export const SetorController = {
   // ➕ CADASTRAR SETOR
   async criar(req: Request, res: Response): Promise<void> {
     try {
-      const { empresaId } = req;
+      // 🛡️ CASTING ESTRITO
+      const empresaId = (req as any).empresaId as string;
       const { nome, filialId } = req.body;
-      const administradorId = req.usuario?.id;
-      const ip = req.ip || req.socket.remoteAddress;
+      const administradorId = (req as any).usuario?.id as string | undefined;
+      const ip = (req.ip || req.socket.remoteAddress) as string | undefined;
 
       if (!nome || !filialId) {
         res.status(400).json({ erro: 'Nome do departamento e Filial de alocação são obrigatórios.' });
@@ -17,7 +18,7 @@ export const SetorController = {
 
       // 🔒 Valida se a filial escolhida pertence de fato à empresa do Admin
       const filialValida = await prisma.filial.findFirst({
-        where: { id: filialId, empresaId: empresaId! }
+        where: { id: filialId, empresaId: empresaId }
       });
 
       if (!filialValida) {
@@ -30,7 +31,7 @@ export const SetorController = {
           data: {
             nome,
             filialId,
-            empresaId: empresaId! // 🔒 Amarra ao Tenant Logado
+            empresaId: empresaId // 🔒 Amarra ao Tenant Logado
           }
         }),
         prisma.logAuditoria.create({
@@ -55,10 +56,11 @@ export const SetorController = {
   // 🔄 LISTAR SETORES COM INCLUDE DA FILIAL (EXATAMENTE COMO O SEU VUE ESPERA)
   async listar(req: Request, res: Response): Promise<void> {
     try {
-      const { empresaId } = req;
+      // 🛡️ CASTING ESTRITO
+      const empresaId = (req as any).empresaId as string;
 
       const setores = await prisma.setor.findMany({
-        where: { empresaId: empresaId! }, // 🔒 Filtro SaaS
+        where: { empresaId: empresaId }, // 🔒 Filtro SaaS
         include: {
           filial: {
             select: { nome: true } // 🟢 Traz o nome da filial para renderizar no badge da tabela do Vue
@@ -77,14 +79,15 @@ export const SetorController = {
   // ✏️ ATUALIZAR SETOR
   async atualizar(req: Request, res: Response): Promise<void> {
     try {
-      const { id } = req.params;
-      const { empresaId } = req;
+      // 🛡️ CASTING ESTRITO
+      const id = req.params.id as string;
+      const empresaId = (req as any).empresaId as string;
       const { nome, filialId } = req.body;
-      const administradorId = req.usuario?.id;
-      const ip = req.ip || req.socket.remoteAddress;
+      const administradorId = (req as any).usuario?.id as string | undefined;
+      const ip = (req.ip || req.socket.remoteAddress) as string | undefined;
 
       const setorExistente = await prisma.setor.findFirst({
-        where: { id, empresaId: empresaId! }
+        where: { id, empresaId: empresaId }
       });
 
       if (!setorExistente) {
@@ -95,7 +98,7 @@ export const SetorController = {
       // Se mudar de filial, valida a propriedade corporativa da nova filial
       if (filialId && filialId !== setorExistente.filialId) {
         const filialValida = await prisma.filial.findFirst({
-          where: { id: filialId, empresaId: empresaId! }
+          where: { id: filialId, empresaId: empresaId }
         });
         if (!filialValida) {
           res.status(400).json({ erro: 'A nova filial selecionada é inválida.' });
@@ -133,13 +136,14 @@ export const SetorController = {
   // ❌ DELETAR SETOR
   async deletar(req: Request, res: Response): Promise<void> {
     try {
-      const { id } = req.params;
-      const { empresaId } = req;
-      const administradorId = req.usuario?.id;
-      const ip = req.ip || req.socket.remoteAddress;
+      // 🛡️ CASTING ESTRITO
+      const id = req.params.id as string;
+      const empresaId = (req as any).empresaId as string;
+      const administradorId = (req as any).usuario?.id as string | undefined;
+      const ip = (req.ip || req.socket.remoteAddress) as string | undefined;
 
       const setorExistente = await prisma.setor.findFirst({
-        where: { id, empresaId: empresaId! }
+        where: { id, empresaId: empresaId }
       });
 
       if (!setorExistente) {
