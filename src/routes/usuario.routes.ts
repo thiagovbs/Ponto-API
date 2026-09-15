@@ -2,6 +2,7 @@ import { Router, Request, Response, NextFunction } from 'express';
 import { UsuarioController } from '../controllers/usuario.controller';
 import { prisma } from '../config/prisma';
 import jwt from 'jsonwebtoken';
+import { AuthMiddleware, PERFIL_TOTEM } from '../middlewares/auth.middleware';
 
 const usuarioRoutes = Router();
 
@@ -36,10 +37,12 @@ const verificarTokenOuTotem = async (req: Request, res: Response, next: NextFunc
         return;
       }
 
-      // 🟢 SOLUÇÃO ATÔMICA: Injeta um usuário fake/sistema para burlar travas internas de perfil do Controller
-      req.usuario = { 
-        id: `TOTEM_SISTEMA_${empresaVinculada.id}`, 
-        perfil: 'ADMIN' // Força o perfil temporário para passar por checagens de autorização internas
+      // Escopo proprio do dispositivo. O totem precisa apenas LER a lista de
+      // funcionarios para montar a tela de selecao; escrita em usuarios exige
+      // ADMIN, conforme declarado nas rotas abaixo.
+      req.usuario = {
+        id: `TOTEM_SISTEMA_${empresaVinculada.id}`,
+        perfil: PERFIL_TOTEM
       };
       
       req.empresaId = empresaVinculada.id;
@@ -55,9 +58,21 @@ const verificarTokenOuTotem = async (req: Request, res: Response, next: NextFunc
 };
 
 // ROTAS CONFIGURADAS COM PROTEÇÃO HÍBRIDA
-usuarioRoutes.post('/', verificarTokenOuTotem, UsuarioController.criarUsuario);
-usuarioRoutes.get('/', verificarTokenOuTotem, UsuarioController.listarUsuarios); 
-usuarioRoutes.put('/:id', verificarTokenOuTotem, UsuarioController.atualizarUsuario);
-usuarioRoutes.delete('/:id', verificarTokenOuTotem, UsuarioController.excluirUsuario);
+// Somente leitura para o totem: e disso que o tablet da portaria precisa para
+// montar a lista de funcionarios. O proprio controller ja restringe o retorno
+// a perfil FUNCIONARIO da empresa do dispositivo.
+usuarioRoutes.get(
+  '/',
+  verificarTokenOuTotem,
+  AuthMiddleware.permitirPerfis('SUPER_ADMIN', 'ADMIN', PERFIL_TOTEM),
+  UsuarioController.listarUsuarios
+);
+
+// Escrita em usuarios e exclusiva de administradores autenticados por JWT.
+const somenteAdmin = AuthMiddleware.permitirPerfis('SUPER_ADMIN', 'ADMIN');
+
+usuarioRoutes.post('/', verificarTokenOuTotem, somenteAdmin, UsuarioController.criarUsuario);
+usuarioRoutes.put('/:id', verificarTokenOuTotem, somenteAdmin, UsuarioController.atualizarUsuario);
+usuarioRoutes.delete('/:id', verificarTokenOuTotem, somenteAdmin, UsuarioController.excluirUsuario);
 
 export { usuarioRoutes };

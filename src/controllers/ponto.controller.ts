@@ -24,8 +24,17 @@ export const PontoController = {
         return;
       }
 
-      const usuario = await prisma.usuario.findUnique({
-        where: { id: usuarioId },
+      // O usuarioId vem do corpo. Sem amarrar a busca a empresa do chamador,
+      // um totem podia registrar ponto para funcionario de outra empresa. O
+      // incluirPontoManualmente ja seguia este padrao; aqui faltava.
+      // empresaId ausente significa SUPER_ADMIN, que atua fora do isolamento.
+      const empresaChamador = (req as any).empresaId as string | undefined;
+
+      const usuario = await prisma.usuario.findFirst({
+        where: {
+          id: usuarioId,
+          ...(empresaChamador ? { empresaId: empresaChamador } : {}),
+        },
       });
 
       if (!usuario) {

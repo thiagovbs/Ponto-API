@@ -17,6 +17,19 @@ export const UsuarioController = {
         return;
       }
 
+      // O perfil vinha do corpo sem validacao: bastava enviar SUPER_ADMIN para
+      // criar uma conta que atravessa o isolamento entre empresas.
+      // SUPER_ADMIN nao entra na lista de proposito: e criado apenas pela rota
+      // dedicada /api/super, que exige que o chamador ja seja SUPER_ADMIN.
+      const PERFIS_VALIDOS = ['ADMIN', 'FUNCIONARIO'];
+      if (!PERFIS_VALIDOS.includes(perfil)) {
+        res.status(400).json({
+          erro: `Perfil inválido. Use um de: ${PERFIS_VALIDOS.join(', ')}.`,
+        });
+        return;
+      }
+
+
       const usuarioExistente = await prisma.usuario.findUnique({
         where: { cpf }
       });

@@ -1,6 +1,20 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 
+/**
+ * Perfis reconhecidos na autorizacao.
+ *
+ * TOTEM nao existe no enum do banco: e um escopo de execucao atribuido ao
+ * tablet da portaria, que se autentica pelo header x-totem-token e nao
+ * corresponde a nenhum usuario. Antes o totem recebia perfil ADMIN "para
+ * passar pelas checagens internas", o que lhe dava poder de criar, alterar e
+ * excluir usuarios -- inclusive um SUPER_ADMIN, que atravessa o isolamento
+ * entre empresas.
+ */
+export type PerfilAutorizacao = 'SUPER_ADMIN' | 'ADMIN' | 'FUNCIONARIO' | 'TOTEM';
+
+export const PERFIL_TOTEM: PerfilAutorizacao = 'TOTEM';
+
 // 🛡️ DECLARAÇÃO GLOBAL: Adiciona a propriedade 'usuario' diretamente no Request do Express
 declare global {
   namespace Express {
@@ -36,6 +50,26 @@ export const AuthMiddleware = {
     } catch (error) {
       res.status(401).json({ erro: 'Token inválido ou expirado.' });
     }
+  },
+
+  /**
+   * Autoriza apenas os perfis informados. Cada rota declara explicitamente
+   * quem pode executa-la, em vez de depender de um perfil injetado para
+   * "passar pelas checagens".
+   */
+  permitirPerfis(...permitidos: PerfilAutorizacao[]) {
+    return (req: Request, res: Response, next: NextFunction): void => {
+      const perfil = req.usuario?.perfil as PerfilAutorizacao | undefined;
+
+      if (!perfil || !permitidos.includes(perfil)) {
+        res.status(403).json({
+          erro: 'Acesso negado. Esta operação não é permitida para o seu perfil.',
+        });
+        return;
+      }
+
+      next();
+    };
   },
 
   // Middleware 2: Verifica se o usuário tem permissão de Administrador

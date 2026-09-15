@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
-import { prisma } from '../config/prisma'; // 🟢 INJETADO: Prisma para validar o token do tablet inline
+import { prisma } from '../config/prisma';
+import { PERFIL_TOTEM } from './auth.middleware'; // 🟢 INJETADO: Prisma para validar o token do tablet inline
 
 export async function tenantMiddleware(req: Request, res: Response, next: NextFunction) {
   const perfil = req.usuario?.perfil as string;
@@ -29,9 +30,10 @@ export async function tenantMiddleware(req: Request, res: Response, next: NextFu
         return res.status(401).json({ erro: 'Acesso negado: Empresa ou Token de identificação não localizados.' });
       }
 
-      // Injeta os escopos virtuais exigidos pelas camadas superiores de controllers e logs
+      // O totem recebe um escopo proprio, nao ADMIN. Cada rota declara se
+      // aceita TOTEM; ele nao herda mais poder administrativo por tabela.
       req.empresaId = empresaVinculada.id;
-      req.usuario = { id: `TOTEM_SISTEMA_${empresaVinculada.id}`, perfil: 'ADMIN' };
+      req.usuario = { id: `TOTEM_SISTEMA_${empresaVinculada.id}`, perfil: PERFIL_TOTEM };
 
       console.log(`📡 [Tenant Middleware] Totem autenticado com sucesso para: ${empresaVinculada.razaoSocial}`);
       return next(); // Porteira aberta com segurança!
