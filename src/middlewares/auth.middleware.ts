@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
+import { JWT_SECRET } from '../config/env';
 
 /**
  * Perfis reconhecidos na autorizacao.
@@ -40,7 +41,7 @@ export const AuthMiddleware = {
     const [, token] = authHeader.split(' ');
 
     try {
-      const secret = process.env.JWT_SECRET || 'fallback_secret';
+      const secret = JWT_SECRET;
       
       const decoded = jwt.verify(token, secret) as { id: string, perfil: string };
       

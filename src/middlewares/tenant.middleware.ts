@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
+import { JWT_SECRET } from '../config/env';
 import { prisma } from '../config/prisma';
 import { PERFIL_TOTEM } from './auth.middleware'; // 🟢 INJETADO: Prisma para validar o token do tablet inline
 
@@ -57,7 +58,7 @@ export async function tenantMiddleware(req: Request, res: Response, next: NextFu
     }
 
     const token = partes[1];
-    const secret = process.env.JWT_SECRET || 'fallback_secret';
+    const secret = JWT_SECRET;
 
     const decodificado = jwt.verify(token, secret) as {
       id: string;

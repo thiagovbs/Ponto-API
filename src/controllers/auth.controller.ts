@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { prisma } from '../config/prisma';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
+import { JWT_SECRET } from '../config/env';
 
 export const AuthController = {
   async login(req: Request, res: Response): Promise<void> {
@@ -32,7 +33,7 @@ export const AuthController = {
       }
 
       // 3. Inclui o 'empresaId' dentro do Token JWT
-      const secret = process.env.JWT_SECRET || 'fallback_secret';
+      const secret = JWT_SECRET;
       const token = jwt.sign(
         { 
           id: usuario.id, 
@@ -91,7 +92,7 @@ export const AuthController = {
         }
       });
 
-      const secret = process.env.JWT_SECRET || 'fallback_secret';
+      const secret = JWT_SECRET;
 
       // Gera um token JWT modificado com o escopo da empresa alvo
       const tokenPersonificado = jwt.sign(
