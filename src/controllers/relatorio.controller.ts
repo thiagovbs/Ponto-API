@@ -1,6 +1,27 @@
 import { Request, Response } from 'express';
 import { prisma } from '../config/prisma';
 import HTMLPDF from 'html-pdf-node';
+
+/**
+ * Escapa texto para interpolacao segura no HTML do espelho de ponto.
+ *
+ * O html-pdf-node renderiza esse HTML em um Chromium headless. Interpolar dado
+ * cru ali nao e apenas quebra de layout: nome de funcionario, razao social e
+ * observacao de afastamento sao definidos por administradores de empresa, e um
+ * valor com marcacao passaria a executar no navegador do servidor -- alcancando
+ * a rede interna e devolvendo o resultado dentro do proprio PDF.
+ *
+ * Toda interpolacao de dado no HTML do PDF passa por aqui. A unica excecao
+ * legitima e `linhasHtml`, que ja e HTML montado com os valores escapados.
+ */
+function escaparHtml(valor: unknown): string {
+  return String(valor ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
 import { gerarConteudoAEF } from '../services/aef.service';
 
 const transformarEmMinutos = (horarioStr: string): number => {
@@ -167,8 +188,8 @@ export const RelatorioController = {
 
       for (let dia = 1; dia <= totalDiasNoMes; dia++) {
         const dataCorrente = new Date(anoInt, mesInt - 1, dia);
-        const dataCorrenteStr = `${anoInt}-${String(mesInt).padStart(2, '0')}-${String(dia).padStart(2, '0')}`;
-        const dataAfastamentoCheck = new Date(`${anoInt}-${String(mesInt).padStart(2, '0')}-${String(dia).padStart(2, '0')}T12:00:00.000Z`);
+        const dataCorrenteStr = `${escaparHtml(anoInt)}-${escaparHtml(String(mesInt).padStart(2, '0'))}-${String(dia).padStart(2, '0')}`;
+        const dataAfastamentoCheck = new Date(`${escaparHtml(anoInt)}-${escaparHtml(String(mesInt).padStart(2, '0'))}-${String(dia).padStart(2, '0')}T12:00:00.000Z`);
         
         const diaSemanaNum = dataCorrente.getDay();
 
@@ -427,8 +448,8 @@ export const RelatorioController = {
 
       for (let dia = 1; dia <= totalDiasNoMes; dia++) {
         const dataCorrente = new Date(anoInt, mesInt - 1, dia);
-        const dataCorrenteStr = `${String(dia).padStart(2, '0')}/${String(mesInt).padStart(2, '0')}/${anoInt}`;
-        const dataAfastamentoCheck = new Date(`${anoInt}-${String(mesInt).padStart(2, '0')}-${String(dia).padStart(2, '0')}T12:00:00.000Z`);
+        const dataCorrenteStr = `${String(dia).padStart(2, '0')}/${escaparHtml(String(mesInt).padStart(2, '0'))}/${escaparHtml(anoInt)}`;
+        const dataAfastamentoCheck = new Date(`${escaparHtml(anoInt)}-${escaparHtml(String(mesInt).padStart(2, '0'))}-${String(dia).padStart(2, '0')}T12:00:00.000Z`);
         
         const diaSemanaNum = dataCorrente.getDay();
 
@@ -605,19 +626,19 @@ export const RelatorioController = {
         if (dia.status === 'AFASTADO') {
           linhasHtml += `
             <tr style="line-height: 1.1; background-color: #f4fbf7;">
-              <td style="border: 1px solid #444; padding: 3px; text-align: center;">${dia.data}</td>
+              <td style="border: 1px solid #444; padding: 3px; text-align: center;">${escaparHtml(dia.data)}</td>
               <td colspan="3" style="border: 1px solid #444; padding: 3px; text-align: center; color: #155724; font-weight: bold; font-size: 7.5pt; letter-spacing: 0.3px;">
-                ${dia.observacao}
+                ${escaparHtml(dia.observacao)}
               </td>
             </tr>
           `;
         } else {
           linhasHtml += `
             <tr style="line-height: 1.1;">
-              <td style="border: 1px solid #444; padding: 3px; text-align: center;">${dia.data}</td>
-              <td style="border: 1px solid #444; padding: 3px; text-align: left; padding-left: 8px; letter-spacing: 0.3px;">${dia.batidasTexto}</td>
-              <td style="border: 1px solid #444; padding: 3px; text-align: center;">${dia.horasTrabalhadas}</td>
-              <td style="border: 1px solid #444; padding: 3px; text-align: center;">${dia.saldoDoDia}</td>
+              <td style="border: 1px solid #444; padding: 3px; text-align: center;">${escaparHtml(dia.data)}</td>
+              <td style="border: 1px solid #444; padding: 3px; text-align: left; padding-left: 8px; letter-spacing: 0.3px;">${escaparHtml(dia.batidasTexto)}</td>
+              <td style="border: 1px solid #444; padding: 3px; text-align: center;">${escaparHtml(dia.horasTrabalhadas)}</td>
+              <td style="border: 1px solid #444; padding: 3px; text-align: center;">${escaparHtml(dia.saldoDoDia)}</td>
             </tr>
           `;
         }
@@ -656,16 +677,16 @@ export const RelatorioController = {
             <div class="title">Espelho de Ponto Eletrônico</div>
             <table style="width:100%; border:none; margin:0; font-size: 8.5pt;">
               <tr style="border:none;">
-                <td style="border:none; padding:1px;"><strong>Empregador:</strong> ${usuario.empresa?.razaoSocial}</td>
-                <td style="border:none; padding:1px; text-align:right;"><strong>CNPJ:</strong> ${usuario.empresa?.cnpj}</td>
+                <td style="border:none; padding:1px;"><strong>Empregador:</strong> ${escaparHtml(usuario.empresa?.razaoSocial)}</td>
+                <td style="border:none; padding:1px; text-align:right;"><strong>CNPJ:</strong> ${escaparHtml(usuario.empresa?.cnpj)}</td>
               </tr>
               <tr style="border:none;">
-                <td style="border:none; padding:1px;"><strong>Funcionário:</strong> ${usuario.nome}</td>
-                <td style="border:none; padding:1px; text-align:right;"><strong>Período de Referência:</strong> ${String(mesInt).padStart(2, '0')}/${anoInt}</td>
+                <td style="border:none; padding:1px;"><strong>Funcionário:</strong> ${escaparHtml(usuario.nome)}</td>
+                <td style="border:none; padding:1px; text-align:right;"><strong>Período de Referência:</strong> ${escaparHtml(String(mesInt).padStart(2, '0'))}/${escaparHtml(anoInt)}</td>
               </tr>
               <tr style="border:none;">
-                <td style="border:none; padding:1px;"><strong>CPF:</strong> ${usuario.cpf || 'Não cadastrado'}</td>
-                <td style="border:none; padding:1px; text-align:right;"><strong>Data de Emissão:</strong> ${new Date().toLocaleDateString('pt-BR')}</td>
+                <td style="border:none; padding:1px;"><strong>CPF:</strong> ${escaparHtml(usuario.cpf || 'Não cadastrado')}</td>
+                <td style="border:none; padding:1px; text-align:right;"><strong>Data de Emissão:</strong> ${escaparHtml(new Date().toLocaleDateString('pt-BR'))}</td>
               </tr>
             </table>
           </div>
@@ -685,8 +706,8 @@ export const RelatorioController = {
           </table>
 
           <div class="resumo-box">
-            <strong>Total de Faltas no Período:</strong> ${totalFaltas} dia(s) <br/>
-            <strong>Saldo Acumulado no Mês:</strong> ${formatarMinutosParaHoras(saldoBancoHorasMinutos)}
+            <strong>Total de Faltas no Período:</strong> ${escaparHtml(totalFaltas)} dia(s) <br/>
+            <strong>Saldo Acumulado no Mês:</strong> ${escaparHtml(formatarMinutosParaHoras(saldoBancoHorasMinutos))}
           </div>
           <div class="clear"></div>
 
@@ -698,7 +719,7 @@ export const RelatorioController = {
               <tr style="border: none;">
                 <td style="border: none; width: 50%; text-align: center; padding: 0;">
                   <div class="line"></div>
-                  <strong>${usuario.nome}</strong><br/>
+                  <strong>${escaparHtml(usuario.nome)}</strong><br/>
                   <span style="font-size:7.5pt; color:#444;">Assinatura do Funcionário</span>
                 </td>
                 <td style="border: none; width: 50%; text-align: center; padding: 0;">

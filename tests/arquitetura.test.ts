@@ -177,3 +177,66 @@ describe('escopo do totem', () => {
     }
   });
 });
+
+describe('geração de PDF', () => {
+  // O espelho de ponto é montado como HTML e renderizado pelo html-pdf-node,
+  // que roda um Chromium. Nome de funcionário, razão social e observação de
+  // afastamento são definidos por administradores de empresa: interpolar
+  // qualquer um deles cru faz o navegador do servidor executar marcação
+  // alheia, alcançando a rede interna e devolvendo o resultado no próprio PDF.
+  it('nenhum dado é interpolado sem escape no HTML do PDF', () => {
+    const controller = ler('controllers/relatorio.controller.ts');
+
+    const inicio = controller.indexOf('let linhasHtml');
+    const fim = controller.indexOf('const options = ');
+    assert.ok(inicio !== -1 && fim > inicio, 'Bloco de montagem do PDF não localizado.');
+
+    const html = controller.slice(inicio, fim);
+    const cruas: string[] = [];
+
+    for (const m of html.matchAll(/\$\{([^}]+)\}/g)) {
+      const expressao = m[1].trim();
+      // linhasHtml já é HTML montado com os valores escapados.
+      if (expressao === 'linhasHtml') continue;
+      if (!expressao.includes('escaparHtml')) cruas.push(expressao);
+    }
+
+    assert.deepEqual(
+      cruas,
+      [],
+      'Interpolações sem escaparHtml no HTML do PDF: ' + cruas.join(', ')
+    );
+  });
+
+  it('a função de escape neutraliza marcação', () => {
+    const controller = ler('controllers/relatorio.controller.ts');
+    const corpo = controller.match(/function escaparHtml[\s\S]*?\n\}/);
+
+    assert.ok(corpo, 'escaparHtml não encontrada.');
+    for (const caractere of ['&', '<', '>', '"', "'"]) {
+      assert.ok(
+        corpo![0].includes(`/${caractere}/g`),
+        `escaparHtml precisa tratar ${caractere}.`
+      );
+    }
+  });
+
+  it('nome e CPF são validados antes de chegar ao banco', () => {
+    const usuarios = ler('controllers/usuario.controller.ts');
+
+    assert.ok(usuarios.includes('function validarIdentidade'), 'validarIdentidade ausente.');
+
+    // Criar e atualizar recebem nome e cpf do corpo: os dois precisam validar.
+    const semValidacao: string[] = [];
+    for (const metodo of ['criarUsuario', 'atualizarUsuario']) {
+      const inicio = usuarios.indexOf(`async ${metodo}(`);
+      assert.notEqual(inicio, -1, `${metodo} não encontrado.`);
+
+      const proximo = usuarios.indexOf('async ', inicio + 10);
+      const corpo = usuarios.slice(inicio, proximo === -1 ? undefined : proximo);
+      if (!corpo.includes('validarIdentidade(')) semValidacao.push(metodo);
+    }
+
+    assert.deepEqual(semValidacao, [], 'Sem validação de identidade: ' + semValidacao.join(', '));
+  });
+});

@@ -2,6 +2,34 @@ import { Request, Response } from 'express';
 import { prisma } from '../config/prisma';
 import bcrypt from 'bcrypt';
 
+/**
+ * Validacao de identidade do funcionario.
+ *
+ * nome e cpf chegam do corpo da requisicao e sao interpolados no HTML do
+ * espelho de ponto, que o html-pdf-node renderiza em um Chromium. O escape em
+ * relatorio.controller.ts e a defesa principal; recusar marcacao ja na entrada
+ * e a segunda camada -- e evita que um nome com `<` chegue ao banco e apareca
+ * quebrado em qualquer outro lugar.
+ */
+const NOME_MAXIMO = 120;
+const MARCACAO = /[<>]/;
+
+function validarIdentidade(nome: unknown, cpf: unknown): string | null {
+  const nomeTexto = String(nome ?? '').trim();
+  const cpfTexto = String(cpf ?? '').replace(/\D/g, '');
+
+  if (nomeTexto.length < 2 || nomeTexto.length > NOME_MAXIMO) {
+    return `O nome deve ter entre 2 e ${NOME_MAXIMO} caracteres.`;
+  }
+  if (MARCACAO.test(nomeTexto)) {
+    return 'O nome nao pode conter os caracteres < ou >.';
+  }
+  if (cpfTexto.length !== 11) {
+    return 'O CPF deve conter 11 digitos.';
+  }
+  return null;
+}
+
 export const UsuarioController = {
   async criarUsuario(req: Request, res: Response): Promise<void> {
     try {
@@ -21,6 +49,12 @@ export const UsuarioController = {
       // criar uma conta que atravessa o isolamento entre empresas.
       // SUPER_ADMIN nao entra na lista de proposito: e criado apenas pela rota
       // dedicada /api/super, que exige que o chamador ja seja SUPER_ADMIN.
+      const erroIdentidade = validarIdentidade(nome, cpf);
+      if (erroIdentidade) {
+        res.status(400).json({ erro: erroIdentidade });
+        return;
+      }
+
       const PERFIS_VALIDOS = ['ADMIN', 'FUNCIONARIO'];
       if (!PERFIS_VALIDOS.includes(perfil)) {
         res.status(400).json({
@@ -105,6 +139,14 @@ export const UsuarioController = {
 
       if (!usuarioAntes) {
         res.status(404).json({ erro: 'Usuário não encontrado.' });
+        return;
+      }
+
+      // Mesma validacao da criacao: nome e cpf chegam do corpo e vao parar no
+      // HTML do espelho de ponto.
+      const erroIdentidade = validarIdentidade(nome ?? usuarioAntes.nome, cpf ?? usuarioAntes.cpf);
+      if (erroIdentidade) {
+        res.status(400).json({ erro: erroIdentidade });
         return;
       }
 
