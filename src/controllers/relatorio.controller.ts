@@ -1,27 +1,6 @@
 import { Request, Response } from 'express';
 import { prisma } from '../config/prisma';
-import HTMLPDF from 'html-pdf-node';
-
-/**
- * Escapa texto para interpolacao segura no HTML do espelho de ponto.
- *
- * O html-pdf-node renderiza esse HTML em um Chromium headless. Interpolar dado
- * cru ali nao e apenas quebra de layout: nome de funcionario, razao social e
- * observacao de afastamento sao definidos por administradores de empresa, e um
- * valor com marcacao passaria a executar no navegador do servidor -- alcancando
- * a rede interna e devolvendo o resultado dentro do proprio PDF.
- *
- * Toda interpolacao de dado no HTML do PDF passa por aqui. A unica excecao
- * legitima e `linhasHtml`, que ja e HTML montado com os valores escapados.
- */
-function escaparHtml(valor: unknown): string {
-  return String(valor ?? '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
-}
+import { gerarEspelhoDePonto, type DiaDoEspelho } from '../config/pdf';
 import { gerarConteudoAEF } from '../services/aef.service';
 
 const transformarEmMinutos = (horarioStr: string): number => {
@@ -188,8 +167,8 @@ export const RelatorioController = {
 
       for (let dia = 1; dia <= totalDiasNoMes; dia++) {
         const dataCorrente = new Date(anoInt, mesInt - 1, dia);
-        const dataCorrenteStr = `${escaparHtml(anoInt)}-${escaparHtml(String(mesInt).padStart(2, '0'))}-${String(dia).padStart(2, '0')}`;
-        const dataAfastamentoCheck = new Date(`${escaparHtml(anoInt)}-${escaparHtml(String(mesInt).padStart(2, '0'))}-${String(dia).padStart(2, '0')}T12:00:00.000Z`);
+        const dataCorrenteStr = `${anoInt}-${String(mesInt).padStart(2, '0')}-${String(dia).padStart(2, '0')}`;
+        const dataAfastamentoCheck = new Date(`${anoInt}-${String(mesInt).padStart(2, '0')}-${String(dia).padStart(2, '0')}T12:00:00.000Z`);
         
         const diaSemanaNum = dataCorrente.getDay();
 
@@ -448,8 +427,8 @@ export const RelatorioController = {
 
       for (let dia = 1; dia <= totalDiasNoMes; dia++) {
         const dataCorrente = new Date(anoInt, mesInt - 1, dia);
-        const dataCorrenteStr = `${String(dia).padStart(2, '0')}/${escaparHtml(String(mesInt).padStart(2, '0'))}/${escaparHtml(anoInt)}`;
-        const dataAfastamentoCheck = new Date(`${escaparHtml(anoInt)}-${escaparHtml(String(mesInt).padStart(2, '0'))}-${String(dia).padStart(2, '0')}T12:00:00.000Z`);
+        const dataCorrenteStr = `${String(dia).padStart(2, '0')}/${String(mesInt).padStart(2, '0')}/${anoInt}`;
+        const dataAfastamentoCheck = new Date(`${anoInt}-${String(mesInt).padStart(2, '0')}-${String(dia).padStart(2, '0')}T12:00:00.000Z`);
         
         const diaSemanaNum = dataCorrente.getDay();
 
@@ -608,140 +587,43 @@ export const RelatorioController = {
           return !(b.modificacoes && b.modificacoes.length > 0 && b.modificacoes[0].dataHoraNova.getTime() === 0);
         });
 
-        const batidasTexto = batidasFiltradasParaExibicao.length > 0 
-          ? batidasFiltradasParaExibicao.map(b => (b as any).dataCalculoReal.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' })).join('  |  ') 
-          : (status === 'FOLGA' ? '<span style="color:#777; font-style:italic;">FOLGA</span>' : '<span style="color:#dc2626; font-weight:bold;">FALTA UNIFICADA</span>');
+        // Só os horários. O rótulo de folga ou falta e o estilo dele saem do
+        // `status` na hora de desenhar: antes vinham embutidos aqui como
+        // `<span style="...">FOLGA</span>`, o que acoplava dado a apresentação.
+        const batidas = batidasFiltradasParaExibicao.map(b =>
+          (b as any).dataCalculoReal.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' })
+        );
 
         historicoDias.push({
           data: dataCorrenteStr,
           status,
-          batidasTexto,
+          batidas,
           horasTrabalhadas: formatarMinutosParaHoras(minutosTrabalhadosNoDia),
           saldoDoDia: formatarMinutosParaHoras(saldoDoDiaMinutos)
         });
       }
 
-      let linhasHtml = '';
-      historicoDias.forEach(dia => {
-        if (dia.status === 'AFASTADO') {
-          linhasHtml += `
-            <tr style="line-height: 1.1; background-color: #f4fbf7;">
-              <td style="border: 1px solid #444; padding: 3px; text-align: center;">${escaparHtml(dia.data)}</td>
-              <td colspan="3" style="border: 1px solid #444; padding: 3px; text-align: center; color: #155724; font-weight: bold; font-size: 7.5pt; letter-spacing: 0.3px;">
-                ${escaparHtml(dia.observacao)}
-              </td>
-            </tr>
-          `;
-        } else {
-          linhasHtml += `
-            <tr style="line-height: 1.1;">
-              <td style="border: 1px solid #444; padding: 3px; text-align: center;">${escaparHtml(dia.data)}</td>
-              <td style="border: 1px solid #444; padding: 3px; text-align: left; padding-left: 8px; letter-spacing: 0.3px;">${escaparHtml(dia.batidasTexto)}</td>
-              <td style="border: 1px solid #444; padding: 3px; text-align: center;">${escaparHtml(dia.horasTrabalhadas)}</td>
-              <td style="border: 1px solid #444; padding: 3px; text-align: center;">${escaparHtml(dia.saldoDoDia)}</td>
-            </tr>
-          `;
-        }
+      // O layout vive em config/pdf.ts. Aqui fica apenas o dado: o controller
+      // nao monta mais marcacao, e por isso nao ha mais o que escapar.
+      const pdf = await gerarEspelhoDePonto({
+        empresa: {
+          razaoSocial: usuario.empresa?.razaoSocial ?? '',
+          cnpj: usuario.empresa?.cnpj ?? ''
+        },
+        funcionario: {
+          nome: usuario.nome,
+          cpf: usuario.cpf || 'Nao cadastrado'
+        },
+        periodo: `${String(mesInt).padStart(2, '0')}/${anoInt}`,
+        emitidoEm: new Date().toLocaleDateString('pt-BR'),
+        dias: historicoDias as DiaDoEspelho[],
+        totalFaltas,
+        saldoAcumulado: formatarMinutosParaHoras(saldoBancoHorasMinutos)
       });
 
-      const htmlCompleto = `
-        <!DOCTYPE html>
-        <html>
-        <head>
-          <meta charset="UTF-8">
-          <style>
-            @page { 
-              size: A4; 
-              margin: 12mm 12mm 10mm 12mm;
-            }
-            body { 
-              font-family: Arial, sans-serif; 
-              font-size: 8pt; 
-              color: #000; 
-              line-height: 1.15;
-              margin: 0;
-              padding: 0;
-            }
-            .header { border: 1px solid #000; padding: 6px 10px; margin-bottom: 6px; }
-            .title { text-align: center; font-size: 11pt; font-weight: bold; margin: 0 0 2px 0; text-transform: uppercase; letter-spacing: 0.5px; }
-            table { width: 100%; border-collapse: collapse; margin-bottom: 6px; }
-            th { border: 1px solid #444; background-color: #eaeaea; padding: 4px; font-weight: bold; text-align: center; font-size: 8pt; }
-            .signatures { width: 100%; margin-top: 10px; }
-            .line { border-top: 1px solid #000; width: 85%; margin: 20px auto 3px auto; text-align: center; }
-            .resumo-box { float: right; width: 40%; border: 1px solid #000; padding: 5px; background-color: #fafafa; margin-bottom: 6px; }
-            .clear { clear: both; }
-          </style>
-        </head>
-        <body>
-          <div class="header">
-            <div class="title">Espelho de Ponto Eletrônico</div>
-            <table style="width:100%; border:none; margin:0; font-size: 8.5pt;">
-              <tr style="border:none;">
-                <td style="border:none; padding:1px;"><strong>Empregador:</strong> ${escaparHtml(usuario.empresa?.razaoSocial)}</td>
-                <td style="border:none; padding:1px; text-align:right;"><strong>CNPJ:</strong> ${escaparHtml(usuario.empresa?.cnpj)}</td>
-              </tr>
-              <tr style="border:none;">
-                <td style="border:none; padding:1px;"><strong>Funcionário:</strong> ${escaparHtml(usuario.nome)}</td>
-                <td style="border:none; padding:1px; text-align:right;"><strong>Período de Referência:</strong> ${escaparHtml(String(mesInt).padStart(2, '0'))}/${escaparHtml(anoInt)}</td>
-              </tr>
-              <tr style="border:none;">
-                <td style="border:none; padding:1px;"><strong>CPF:</strong> ${escaparHtml(usuario.cpf || 'Não cadastrado')}</td>
-                <td style="border:none; padding:1px; text-align:right;"><strong>Data de Emissão:</strong> ${escaparHtml(new Date().toLocaleDateString('pt-BR'))}</td>
-              </tr>
-            </table>
-          </div>
-
-          <table>
-            <thead>
-              <tr>
-                <th width="15%">Data</th>
-                <th width="55%">Marcações Registradas (Horas)</th>
-                <th width="15%">Trabalhadas</th>
-                <th width="15%">Saldo do Dia</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${linhasHtml}
-            </tbody>
-          </table>
-
-          <div class="resumo-box">
-            <strong>Total de Faltas no Período:</strong> ${escaparHtml(totalFaltas)} dia(s) <br/>
-            <strong>Saldo Acumulado no Mês:</strong> ${escaparHtml(formatarMinutosParaHoras(saldoBancoHorasMinutos))}
-          </div>
-          <div class="clear"></div>
-
-          <div class="signatures">
-            <p style="font-size: 7.5pt; text-align: justify; margin: 0 0 10px 0; color: #222;">
-              Reconheço a fidelidade e a exatidão das marcações de horários e períodos aqui expostas, em total conformidade com o artigo 74 da Consolidação das Leis do Trabalho (CLT).
-            </p>
-            <table style="border: none; width: 100%; margin-top: 5px;">
-              <tr style="border: none;">
-                <td style="border: none; width: 50%; text-align: center; padding: 0;">
-                  <div class="line"></div>
-                  <strong>${escaparHtml(usuario.nome)}</strong><br/>
-                  <span style="font-size:7.5pt; color:#444;">Assinatura do Funcionário</span>
-                </td>
-                <td style="border: none; width: 50%; text-align: center; padding: 0;">
-                  <div class="line"></div>
-                  <strong>Representante Legal</strong><br/>
-                  <span style="font-size:7.5pt; color:#444;">Assinatura do Empregador</span>
-                </td>
-              </tr>
-            </table>
-          </div>
-        </body>
-        </html>
-      `;
-
-      const options = { format: 'A4' };
-      const file = { content: htmlCompleto };
-
-      HTMLPDF.generatePdf(file, options).then((pdfBuffer: Buffer) => {
-        res.setHeader('Content-Type', 'application/pdf');
-        res.setHeader('Content-Disposition', `attachment; filename=espelho-ponto-${usuarioId}.pdf`);
-        res.status(200).send(pdfBuffer);
-      });
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename=espelho-ponto-${usuarioId}.pdf`);
+      res.status(200).send(pdf);
 
     } catch (error) {
       console.error(error);

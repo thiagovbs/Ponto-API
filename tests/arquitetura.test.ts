@@ -179,46 +179,77 @@ describe('escopo do totem', () => {
 });
 
 describe('geração de PDF', () => {
-  // O espelho de ponto é montado como HTML e renderizado pelo html-pdf-node,
-  // que roda um Chromium. Nome de funcionário, razão social e observação de
-  // afastamento são definidos por administradores de empresa: interpolar
-  // qualquer um deles cru faz o navegador do servidor executar marcação
-  // alheia, alcançando a rede interna e devolvendo o resultado no próprio PDF.
-  it('nenhum dado é interpolado sem escape no HTML do PDF', () => {
-    const controller = ler('controllers/relatorio.controller.ts');
+  // O serviço roda em 0.1 CPU e 512 MB. Um Chromium headless não cabe nesse
+  // orçamento: ocupava mais memória que a instância inteira em pico e disputava
+  // CPU com o event loop, travando a API durante cada relatório. A geração
+  // passou para o pdfkit, que desenha o documento direto.
+  it('nenhum gerador baseado em navegador volta ao projeto', () => {
+    const pacote = JSON.parse(
+      readFileSync(join(RAIZ, '..', 'package.json'), 'utf-8')
+    ) as { dependencies?: Record<string, string>; devDependencies?: Record<string, string> };
 
-    const inicio = controller.indexOf('let linhasHtml');
-    const fim = controller.indexOf('const options = ');
-    assert.ok(inicio !== -1 && fim > inicio, 'Bloco de montagem do PDF não localizado.');
-
-    const html = controller.slice(inicio, fim);
-    const cruas: string[] = [];
-
-    for (const m of html.matchAll(/\$\{([^}]+)\}/g)) {
-      const expressao = m[1].trim();
-      // linhasHtml já é HTML montado com os valores escapados.
-      if (expressao === 'linhasHtml') continue;
-      if (!expressao.includes('escaparHtml')) cruas.push(expressao);
-    }
+    const dependencias = Object.keys({ ...pacote.dependencies, ...pacote.devDependencies });
+    const navegadores = dependencias.filter((d) =>
+      ['puppeteer', 'puppeteer-core', 'html-pdf-node', 'html-pdf', 'playwright', 'chrome-aws-lambda'].includes(d)
+    );
 
     assert.deepEqual(
-      cruas,
+      navegadores,
       [],
-      'Interpolações sem escaparHtml no HTML do PDF: ' + cruas.join(', ')
+      'Dependência que embute navegador: ' + navegadores.join(', ') +
+        '. O plano é 0.1 CPU / 512 MB — não há espaço para um Chromium.'
     );
   });
 
-  it('a função de escape neutraliza marcação', () => {
-    const controller = ler('controllers/relatorio.controller.ts');
-    const corpo = controller.match(/function escaparHtml[\s\S]*?\n\}/);
+  it('o controller não monta HTML para o relatório', () => {
+    // O espelho vinha como string de HTML interpolada com nome de funcionário,
+    // razão social e justificativa de afastamento — todos preenchidos por
+    // administradores de empresa. Sem parser de marcação no caminho, essa
+    // classe de problema deixa de existir em vez de depender de escape.
+    // Os comentários citam a marcação antiga ao explicar por que ela saiu; só
+    // o código conta.
+    const controller = ler('controllers/relatorio.controller.ts')
+      .split('\n')
+      .filter((l) => {
+        const t = l.trimStart();
+        return !t.startsWith('//') && !t.startsWith('*') && !t.startsWith('/*');
+      })
+      .join('\n');
 
-    assert.ok(corpo, 'escaparHtml não encontrada.');
-    for (const caractere of ['&', '<', '>', '"', "'"]) {
-      assert.ok(
-        corpo![0].includes(`/${caractere}/g`),
-        `escaparHtml precisa tratar ${caractere}.`
-      );
-    }
+    const suspeitos: string[] = [];
+    if (/<(table|tr|td|div|span|html|style)\b/.test(controller)) suspeitos.push('marcação HTML no fonte');
+    if (controller.includes('escaparHtml')) suspeitos.push('escape de HTML (não deveria ser necessário)');
+    if (controller.includes('linhasHtml')) suspeitos.push('montagem de linhas em HTML');
+
+    assert.deepEqual(
+      suspeitos,
+      [],
+      'O relatório voltou a ser montado como HTML: ' + suspeitos.join(', ')
+    );
+  });
+
+  it('a geração de PDF passa pelo módulo compartilhado', () => {
+    const controller = ler('controllers/relatorio.controller.ts');
+
+    assert.ok(
+      controller.includes('gerarEspelhoDePonto('),
+      'A geração de PDF deve passar por config/pdf.ts, onde o layout e o limite de página vivem.'
+    );
+  });
+
+  it('o gerador confere a contagem de páginas antes de devolver', () => {
+    // O relatório é impresso em uma folha só. Sem esta checagem, um layout que
+    // cresça passa a gerar duas folhas em silêncio.
+    const pdf = ler('config/pdf.ts');
+
+    assert.ok(
+      /bufferedPageRange\(\)\.count/.test(pdf),
+      'config/pdf.ts precisa contar as páginas geradas.'
+    );
+    assert.ok(
+      /paginas !== 1/.test(pdf),
+      'A contagem só serve se o gerador recusar um resultado com mais de uma página.'
+    );
   });
 
   it('nome e CPF são validados antes de chegar ao banco', () => {

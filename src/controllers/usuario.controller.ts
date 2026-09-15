@@ -6,7 +6,7 @@ import bcrypt from 'bcrypt';
  * Validacao de identidade do funcionario.
  *
  * nome e cpf chegam do corpo da requisicao e sao interpolados no HTML do
- * espelho de ponto, que o html-pdf-node renderiza em um Chromium. O escape em
+ * espelho de ponto, que e renderizado por um Chromium headless. O escape em
  * relatorio.controller.ts e a defesa principal; recusar marcacao ja na entrada
  * e a segunda camada -- e evita que um nome com `<` chegue ao banco e apareca
  * quebrado em qualquer outro lugar.
