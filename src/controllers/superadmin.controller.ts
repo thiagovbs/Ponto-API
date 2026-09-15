@@ -33,6 +33,9 @@ export const SuperAdminController = {
         return;
       }
 
+      const autorId = ((req as any).usuario?.id as string | undefined) ?? null;
+      const ip = ((req.ip || req.socket.remoteAddress) as string | undefined) ?? null;
+
       // Criptografia da senha do admin mestre da empresa parceira
       const salt = await bcrypt.genSalt(10);
       const senhaHash = await bcrypt.hash(senhaAdmin, salt);
@@ -79,6 +82,28 @@ export const SuperAdminController = {
             empresaId: novaEmpresa.id,
             filialId: filialPadrao.id,
             setorId: setorPadrao.id
+          }
+        });
+
+        // Provisionamento de empresa e a operacao de maior alcance do sistema.
+        // A senha do admin nao entra no log -- apenas o fato de ter sido criada.
+        await tx.logAuditoria.create({
+          data: {
+            acao: 'CREATE',
+            entidade: 'Empresa',
+            usuarioAcaoId: autorId,
+            ipOrigem: ip,
+            dadosAnteriores: null,
+            dadosNovos: {
+              empresaId: novaEmpresa.id,
+              razaoSocial,
+              cnpj,
+              filialPadraoId: filialPadrao.id,
+              setorPadraoId: setorPadrao.id,
+              adminId: novoUsuario.id,
+              adminNome: nomeAdmin,
+              adminCpf: cpfAdmin
+            }
           }
         });
 
@@ -134,10 +159,30 @@ export const SuperAdminController = {
         return;
       }
 
-      await prisma.empresa.update({
-        where: { id },
-        data: { ativo }
-      });
+      const empresaAntes = await prisma.empresa.findUnique({ where: { id } });
+      if (!empresaAntes) {
+        res.status(404).json({ erro: 'Empresa não localizada.' });
+        return;
+      }
+
+      // Bloquear ou reativar uma empresa derruba ou restaura o acesso de todos
+      // os seus usuarios: o log e transacional com a alteracao.
+      await prisma.$transaction([
+        prisma.empresa.update({
+          where: { id },
+          data: { ativo }
+        }),
+        prisma.logAuditoria.create({
+          data: {
+            acao: 'UPDATE',
+            entidade: 'Empresa',
+            usuarioAcaoId: ((req as any).usuario?.id as string | undefined) ?? null,
+            ipOrigem: ((req.ip || req.socket.remoteAddress) as string | undefined) ?? null,
+            dadosAnteriores: { empresaId: id, razaoSocial: empresaAntes.razaoSocial, ativo: empresaAntes.ativo },
+            dadosNovos: { empresaId: id, razaoSocial: empresaAntes.razaoSocial, ativo }
+          }
+        })
+      ]);
 
       res.status(200).json({ mensagem: 'Status organizacional updated com sucesso!' });
     } catch (error: any) {
@@ -177,10 +222,29 @@ export const SuperAdminController = {
       const salt = await bcrypt.genSalt(10);
       const senhaHash = await bcrypt.hash(novaSenha, salt);
 
-      await prisma.usuario.update({
-        where: { id: usuarioAdminId },
-        data: { senhaHash }
-      });
+      // Troca forcada de credencial de um cliente pelo suporte: registra que
+      // houve a troca e quem a fez. Nem a senha nem o hash entram no log.
+      await prisma.$transaction([
+        prisma.usuario.update({
+          where: { id: usuarioAdminId },
+          data: { senhaHash }
+        }),
+        prisma.logAuditoria.create({
+          data: {
+            acao: 'UPDATE',
+            entidade: 'Usuario',
+            usuarioAcaoId: ((req as any).usuario?.id as string | undefined) ?? null,
+            ipOrigem: ((req.ip || req.socket.remoteAddress) as string | undefined) ?? null,
+            dadosAnteriores: null,
+            dadosNovos: {
+              usuarioId: usuarioAdminId,
+              nome: usuarioAdmin.nome,
+              empresaId,
+              senhaRedefinidaPeloSuporte: true
+            }
+          }
+        })
+      ]);
 
       res.status(200).json({
         mensagem: `Senha de acesso para o administrador ${usuarioAdmin.nome} foi atualizada com sucesso no banco.`
@@ -227,7 +291,11 @@ export const SuperAdminController = {
       const salt = await bcrypt.genSalt(10);
       const senhaHash = await bcrypt.hash(senha, salt);
 
-      const novoMestre = await prisma.usuario.create({
+      // Criar um SUPER_ADMIN e a operacao de maior privilegio que existe: a
+      // conta resultante atravessa o isolamento entre empresas. O log vai na
+      // mesma transacao, e a senha nao entra nele.
+      const [novoMestre] = await prisma.$transaction([
+        prisma.usuario.create({
         data: {
           nome,
           cpf,
@@ -243,7 +311,25 @@ export const SuperAdminController = {
           cpf: true,
           createdAt: true
         }
-      });
+        }),
+        prisma.logAuditoria.create({
+          data: {
+            acao: 'CREATE',
+            entidade: 'Usuario',
+            usuarioAcaoId: (superAdminLogado?.id as string | undefined) ?? null,
+            ipOrigem: ((req.ip || req.socket.remoteAddress) as string | undefined) ?? null,
+            dadosAnteriores: null,
+            dadosNovos: {
+              nome,
+              cpf,
+              perfil: 'SUPER_ADMIN',
+              empresaId: superAdminAtual.empresaId,
+              filialId: superAdminAtual.filialId,
+              setorId: superAdminAtual.setorId
+            }
+          }
+        })
+      ]);
 
       res.status(201).json({
         mensagem: 'Novo membro integrado à equipe Super Admin com sucesso!',
